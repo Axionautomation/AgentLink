@@ -1,0 +1,511 @@
+import { useEffect, useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
+import { useGeolocation, isWithinRadius } from "@/hooks/useGeolocation";
+import { useToast } from "@/hooks/use-toast";
+import { isUnauthorizedError } from "@/lib/authUtils";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { ArrowLeft, MapPin, Clock, DollarSign, Home, Building2, CheckCircle2, MapPinned, MessageSquare } from "lucide-react";
+import { Link, useLocation, useParams } from "wouter";
+import type { Job, User } from "@shared/schema";
+
+interface JobWithUsers extends Job {
+  poster?: User;
+  claimer?: User;
+}
+
+export default function JobDetail() {
+  const { id } = useParams();
+  const { user, isLoading: authLoading, isAuthenticated } = useAuth();
+  const { latitude, longitude, error: geoError, refresh: refreshLocation } = useGeolocation();
+  const { toast } = useToast();
+  const [, setLocation] = useLocation();
+  const [canCheckIn, setCanCheckIn] = useState(false);
+
+  const { data: job, isLoading } = useQuery<JobWithUsers>({
+    queryKey: [`/api/jobs/${id}`],
+    enabled: !!id,
+  });
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      toast({
+        title: "Unauthorized",
+        description: "You are logged out. Logging in again...",
+        variant: "destructive",
+      });
+      setTimeout(() => {
+        window.location.href = "/api/login";
+      }, 500);
+    }
+  }, [isAuthenticated, authLoading, toast]);
+
+  // Check if user is within range for GPS check-in
+  useEffect(() => {
+    if (job && latitude && longitude && job.propertyLat && job.propertyLng) {
+      const within = isWithinRadius(
+        latitude,
+        longitude,
+        parseFloat(job.propertyLat),
+        parseFloat(job.propertyLng),
+        200
+      );
+      setCanCheckIn(within);
+    }
+  }, [job, latitude, longitude]);
+
+  const claimJobMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", `/api/jobs/${id}/claim`, {});
+      return response;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Job Claimed!",
+        description: "The job has been assigned to you. Payment is now in escrow.",
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: error.message || "Failed to claim job",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const checkInMutation = useMutation({
+    mutationFn: async () => {
+      if (!latitude || !longitude) {
+        throw new Error("Location not available");
+      }
+      const response = await apiRequest("POST", `/api/jobs/${id}/check-in`, {
+        latitude,
+        longitude,
+      });
+      return response;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Checked In!",
+        description: "Your attendance has been verified via GPS.",
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}`] });
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: error.message || "Failed to check in",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const checkOutMutation = useMutation({
+    mutationFn: async () => {
+      if (!latitude || !longitude) {
+        throw new Error("Location not available");
+      }
+      const response = await apiRequest("POST", `/api/jobs/${id}/check-out`, {
+        latitude,
+        longitude,
+      });
+      return response;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Checked Out!",
+        description: "Job completion recorded. Awaiting payment release.",
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}`] });
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: error.message || "Failed to check out",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const completeJobMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", `/api/jobs/${id}/complete`, {});
+      return response;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Job Completed!",
+        description: "Payment has been released to the agent.",
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}`] });
+      setLocation(`/jobs/${id}/review`);
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: error.message || "Failed to complete job",
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (authLoading || isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  if (!job) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Card className="p-8 text-center">
+          <h2 className="text-xl font-semibold text-card-foreground">Job not found</h2>
+          <Link href="/">
+            <Button className="mt-4 rounded-lg">Back to Marketplace</Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
+
+  const isJobPoster = user?.id === job.posterId;
+  const isJobClaimer = user?.id === job.claimerId;
+  const canClaim = job.status === 'open' && !isJobPoster;
+  const canCheckInNow = isJobClaimer && !job.claimerCheckedIn && canCheckIn;
+  const canCheckOutNow = isJobClaimer && job.claimerCheckedIn && !job.claimerCheckedOut && canCheckIn;
+  const canComplete = isJobPoster && job.claimerCheckedOut && !job.paymentReleased;
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="border-b border-border">
+        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center gap-4">
+          <Link href="/">
+            <Button variant="ghost" size="icon" className="rounded-lg" data-testid="button-back">
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          </Link>
+          <h1 className="text-xl font-bold text-foreground">Job Details</h1>
+        </div>
+      </header>
+
+      <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+        {/* Status Badge */}
+        <div className="flex items-center justify-between">
+          <Badge className={`
+            rounded-full px-4 py-1 text-sm font-medium
+            ${job.status === 'open' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : ''}
+            ${job.status === 'claimed' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : ''}
+            ${job.status === 'in_progress' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400' : ''}
+            ${job.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : ''}
+          `} data-testid="badge-status">
+            {job.status.replace('_', ' ').toUpperCase()}
+          </Badge>
+          
+          <div className="text-2xl font-bold font-mono text-primary">
+            ${parseFloat(job.fee).toFixed(2)}
+          </div>
+        </div>
+
+        {/* Property Info */}
+        <Card className="p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            {job.propertyType === 'showing' ? (
+              <Home className="h-6 w-6 text-primary mt-0.5" />
+            ) : (
+              <Building2 className="h-6 w-6 text-primary mt-0.5" />
+            )}
+            <div className="flex-1">
+              <h2 className="text-xl font-semibold text-card-foreground">{job.propertyAddress}</h2>
+              <p className="text-sm text-muted-foreground capitalize mt-1">
+                {job.propertyType.replace('_', ' ')}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-border">
+            <div className="flex items-center gap-3">
+              <Clock className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <p className="text-sm text-muted-foreground">Schedule</p>
+                <p className="font-medium text-card-foreground">
+                  {new Date(job.scheduledDate).toLocaleDateString()}
+                </p>
+                <p className="text-sm text-card-foreground">{job.scheduledTime}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <DollarSign className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <p className="text-sm text-muted-foreground">Payment</p>
+                <p className="font-medium font-mono text-card-foreground">${parseFloat(job.fee).toFixed(2)}</p>
+                <p className="text-xs text-muted-foreground">
+                  Payout: ${job.payoutAmount ? parseFloat(job.payoutAmount).toFixed(2) : '0.00'} (after 20% fee)
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {job.description && (
+            <div className="pt-4 border-t border-border">
+              <p className="text-sm text-muted-foreground mb-2">Description</p>
+              <p className="text-card-foreground">{job.description}</p>
+            </div>
+          )}
+
+          {(isJobClaimer || isJobPoster) && job.specialInstructions && (
+            <div className="pt-4 border-t border-border">
+              <p className="text-sm text-muted-foreground mb-2">Special Instructions</p>
+              <p className="text-card-foreground">{job.specialInstructions}</p>
+            </div>
+          )}
+        </Card>
+
+        {/* Agent Info */}
+        {job.claimer && (
+          <Card className="p-6">
+            <h3 className="text-sm font-semibold text-card-foreground mb-4">
+              {isJobClaimer ? "Job Posted By" : "Covering Agent"}
+            </h3>
+            <div className="flex items-center gap-4">
+              {(isJobClaimer ? job.poster : job.claimer)?.profileImageUrl ? (
+                <img
+                  src={(isJobClaimer ? job.poster : job.claimer)!.profileImageUrl!}
+                  alt={(isJobClaimer ? job.poster : job.claimer)!.firstName || 'Agent'}
+                  className="h-12 w-12 rounded-full object-cover"
+                />
+              ) : (
+                <div className="h-12 w-12 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-semibold">
+                  {(isJobClaimer ? job.poster : job.claimer)?.firstName?.[0] || 'A'}
+                </div>
+              )}
+              <div className="flex-1">
+                <p className="font-medium text-card-foreground">
+                  {(isJobClaimer ? job.poster : job.claimer)?.firstName} {(isJobClaimer ? job.poster : job.claimer)?.lastName}
+                </p>
+                {(isJobClaimer ? job.poster : job.claimer)?.brokerage && (
+                  <p className="text-sm text-muted-foreground">{(isJobClaimer ? job.poster : job.claimer)?.brokerage}</p>
+                )}
+                {(isJobClaimer ? job.poster : job.claimer)?.rating && parseFloat((isJobClaimer ? job.poster : job.claimer)!.rating!) > 0 && (
+                  <p className="text-sm text-muted-foreground">⭐ {parseFloat((isJobClaimer ? job.poster : job.claimer)!.rating!).toFixed(1)} rating</p>
+                )}
+              </div>
+              <Link href={`/messages/${job.id}`}>
+                <Button variant="outline" size="sm" className="rounded-lg" data-testid="button-message">
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                  Message
+                </Button>
+              </Link>
+            </div>
+          </Card>
+        )}
+
+        {/* GPS Check-in Section */}
+        {(isJobClaimer || isJobPoster) && job.status !== 'open' && (
+          <Card className="p-6 space-y-4">
+            <h3 className="text-sm font-semibold text-card-foreground">GPS Verification</h3>
+            
+            {geoError && (
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+                <p className="text-sm text-destructive">Location Error: {geoError}</p>
+                <Button onClick={refreshLocation} variant="outline" size="sm" className="mt-2 rounded-lg">
+                  Retry Location
+                </Button>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {isJobClaimer && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {job.claimerCheckedIn ? (
+                        <CheckCircle2 className="h-5 w-5 text-green-600" />
+                      ) : (
+                        <MapPinned className="h-5 w-5 text-muted-foreground" />
+                      )}
+                      <span className="text-sm text-card-foreground">Check-in</span>
+                    </div>
+                    {job.claimerCheckedIn ? (
+                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded-full">
+                        Verified
+                      </Badge>
+                    ) : canCheckInNow ? (
+                      <Button
+                        onClick={() => checkInMutation.mutate()}
+                        disabled={checkInMutation.isPending}
+                        size="sm"
+                        className="rounded-lg"
+                        data-testid="button-check-in"
+                      >
+                        {checkInMutation.isPending ? "Checking In..." : "Check In"}
+                      </Button>
+                    ) : (
+                      <Badge className="bg-muted text-muted-foreground rounded-full">
+                        {latitude && longitude ? "Not in range (200ft)" : "Waiting for location"}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {job.claimerCheckedOut ? (
+                        <CheckCircle2 className="h-5 w-5 text-green-600" />
+                      ) : (
+                        <MapPinned className="h-5 w-5 text-muted-foreground" />
+                      )}
+                      <span className="text-sm text-card-foreground">Check-out</span>
+                    </div>
+                    {job.claimerCheckedOut ? (
+                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded-full">
+                        Verified
+                      </Badge>
+                    ) : canCheckOutNow ? (
+                      <Button
+                        onClick={() => checkOutMutation.mutate()}
+                        disabled={checkOutMutation.isPending}
+                        size="sm"
+                        className="rounded-lg"
+                        data-testid="button-check-out"
+                      >
+                        {checkOutMutation.isPending ? "Checking Out..." : "Check Out"}
+                      </Button>
+                    ) : (
+                      <Badge className="bg-muted text-muted-foreground rounded-full">
+                        {!job.claimerCheckedIn ? "Check in first" : "Not in range (200ft)"}
+                      </Badge>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {isJobPoster && job.claimerCheckedOut && (
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                  <p className="text-sm text-green-800 dark:text-green-400">
+                    ✓ Agent has completed check-in and check-out. Ready to release payment.
+                  </p>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-4">
+          {canClaim && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button className="flex-1 rounded-lg" data-testid="button-claim">
+                  Claim Job
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Claim this job?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    By claiming this job, you commit to attending the scheduled showing/open house. 
+                    Payment of ${parseFloat(job.fee).toFixed(2)} will be held in escrow and released 
+                    after completion and confirmation.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="rounded-lg">Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => claimJobMutation.mutate()}
+                    disabled={claimJobMutation.isPending}
+                    className="rounded-lg"
+                  >
+                    {claimJobMutation.isPending ? "Claiming..." : "Confirm Claim"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+
+          {canComplete && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button className="flex-1 rounded-lg" data-testid="button-complete">
+                  Complete & Release Payment
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Complete job and release payment?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will release ${job.payoutAmount ? parseFloat(job.payoutAmount).toFixed(2) : '0.00'} 
+                    to the covering agent and mark the job as completed. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="rounded-lg">Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => completeJobMutation.mutate()}
+                    disabled={completeJobMutation.isPending}
+                    className="rounded-lg"
+                  >
+                    {completeJobMutation.isPending ? "Processing..." : "Confirm & Release"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

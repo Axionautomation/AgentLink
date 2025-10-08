@@ -1,15 +1,491 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { WebSocketServer, WebSocket } from "ws";
+import Stripe from "stripe";
 import { storage } from "./storage";
+import { setupAuth, isAuthenticated } from "./replitAuth";
+import { insertJobSchema, insertMessageSchema, insertReviewSchema } from "@shared/schema";
+
+// Initialize Stripe
+if (!process.env.STRIPE_SECRET_KEY) {
+  throw new Error('Missing required Stripe secret: STRIPE_SECRET_KEY');
+}
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2024-11-20.acacia",
+});
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // put application routes here
-  // prefix all routes with /api
+  // Auth middleware
+  await setupAuth(app);
 
-  // use storage to perform CRUD operations on the storage interface
-  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+  // ==================== Auth Routes ====================
+  app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      res.json(user);
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
 
+  // ==================== Job Routes ====================
+  
+  // Get all open jobs (marketplace)
+  app.get("/api/jobs", async (req, res) => {
+    try {
+      const jobs = await storage.getJobs();
+      
+      // Fetch poster info for each job
+      const jobsWithPoster = await Promise.all(
+        jobs.map(async (job) => {
+          const poster = await storage.getUser(job.posterId);
+          const claimer = job.claimerId ? await storage.getUser(job.claimerId) : null;
+          return {
+            ...job,
+            poster,
+            claimer,
+            posterName: poster ? `${poster.firstName} ${poster.lastName}` : 'Unknown',
+          };
+        })
+      );
+      
+      res.json(jobsWithPoster);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get single job with details
+  app.get("/api/jobs/:id", async (req, res) => {
+    try {
+      const job = await storage.getJob(req.params.id);
+      if (!job) {
+        return res.status(404).json({ message: "Job not found" });
+      }
+
+      const poster = await storage.getUser(job.posterId);
+      const claimer = job.claimerId ? await storage.getUser(job.claimerId) : null;
+
+      res.json({
+        ...job,
+        poster,
+        claimer,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Create job
+  app.post("/api/jobs", isAuthenticated, async (req: any, res) => {
+    try {
+      const validatedData = insertJobSchema.parse(req.body);
+      const userId = req.user.claims.sub;
+      
+      // Calculate platform fee (20%)
+      const fee = parseFloat(validatedData.fee);
+      const platformFee = fee * 0.20;
+      const payoutAmount = fee - platformFee;
+      
+      // Create Stripe PaymentIntent for escrow
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(fee * 100), // Convert to cents
+        currency: "usd",
+        automatic_payment_methods: { enabled: true },
+        capture_method: 'manual', // Escrow - we'll capture later
+        metadata: {
+          platformFee: platformFee.toFixed(2),
+          payoutAmount: payoutAmount.toFixed(2),
+        }
+      });
+
+      const job = await storage.createJob({
+        ...validatedData,
+        platformFee: platformFee.toFixed(2),
+        payoutAmount: payoutAmount.toFixed(2),
+        paymentIntentId: paymentIntent.id,
+        escrowHeld: true,
+      });
+
+      // Record the escrow hold transaction
+      await storage.createTransaction({
+        jobId: job.id,
+        payerId: userId,
+        type: 'escrow_hold',
+        amount: fee.toFixed(2),
+        platformFee: platformFee.toFixed(2),
+        netAmount: payoutAmount.toFixed(2),
+        stripePaymentIntentId: paymentIntent.id,
+        status: 'held',
+      });
+
+      res.json({ ...job, clientSecret: paymentIntent.client_secret });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Claim job
+  app.post("/api/jobs/:id/claim", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const job = await storage.claimJob(req.params.id, userId);
+      
+      if (!job) {
+        return res.status(400).json({ message: "Job already claimed or not available" });
+      }
+
+      // Create notification for job poster
+      await storage.createNotification({
+        userId: job.posterId,
+        type: 'job_claimed',
+        title: 'Job Claimed',
+        message: `Your job at ${job.propertyAddress} has been claimed`,
+        jobId: job.id,
+      });
+
+      res.json(job);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // GPS Check-in
+  app.post("/api/jobs/:id/check-in", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { latitude, longitude } = req.body;
+      const job = await storage.getJob(req.params.id);
+
+      if (!job) {
+        return res.status(404).json({ message: "Job not found" });
+      }
+
+      // Verify user is the claimer
+      if (job.claimerId !== userId) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+
+      // Validate property coordinates exist
+      if (!job.propertyLat || !job.propertyLng) {
+        return res.status(400).json({ message: "Job missing property coordinates" });
+      }
+
+      // Calculate distance from property (Haversine formula)
+      const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+        const R = 20902231; // Earth radius in feet
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+      };
+
+      const distance = calculateDistance(
+        parseFloat(job.propertyLat),
+        parseFloat(job.propertyLng),
+        latitude,
+        longitude
+      );
+
+      const verified = distance <= 200; // Within 200 feet
+
+      // Record check-in
+      await storage.createCheckIn({
+        jobId: job.id,
+        userId,
+        latitude: latitude.toString(),
+        longitude: longitude.toString(),
+        type: 'check_in',
+        timestamp: new Date(),
+        distanceFromProperty: distance.toFixed(2),
+        verified,
+      });
+
+      const updated = await storage.updateJob(req.params.id, {
+        claimerCheckedIn: verified,
+        claimerCheckInTime: new Date(),
+        status: verified ? 'in_progress' : job.status,
+      });
+
+      res.json({ ...updated, verified, distance: distance.toFixed(2) });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // GPS Check-out
+  app.post("/api/jobs/:id/check-out", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { latitude, longitude } = req.body;
+      const job = await storage.getJob(req.params.id);
+
+      if (!job) {
+        return res.status(404).json({ message: "Job not found" });
+      }
+
+      if (job.claimerId !== userId) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+
+      // Validate property coordinates exist
+      if (!job.propertyLat || !job.propertyLng) {
+        return res.status(400).json({ message: "Job missing property coordinates" });
+      }
+
+      // Calculate distance from property
+      const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+        const R = 20902231;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+      };
+
+      const distance = calculateDistance(
+        parseFloat(job.propertyLat),
+        parseFloat(job.propertyLng),
+        latitude,
+        longitude
+      );
+
+      const verified = distance <= 200;
+
+      // Record check-out
+      await storage.createCheckIn({
+        jobId: job.id,
+        userId,
+        latitude: latitude.toString(),
+        longitude: longitude.toString(),
+        type: 'check_out',
+        timestamp: new Date(),
+        distanceFromProperty: distance.toFixed(2),
+        verified,
+      });
+
+      const updated = await storage.updateJob(req.params.id, {
+        claimerCheckedOut: verified,
+        claimerCheckOutTime: new Date(),
+      });
+
+      // Notify job poster
+      await storage.createNotification({
+        userId: job.posterId,
+        type: 'job_reminder',
+        title: 'Agent Checked Out',
+        message: `Agent has completed the job at ${job.propertyAddress}`,
+        jobId: job.id,
+      });
+
+      res.json({ ...updated, verified, distance: distance.toFixed(2) });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Complete job and release payment
+  app.post("/api/jobs/:id/complete", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const job = await storage.getJob(req.params.id);
+
+      if (!job) {
+        return res.status(404).json({ message: "Job not found" });
+      }
+
+      if (job.posterId !== userId) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+
+      if (!job.paymentIntentId) {
+        return res.status(400).json({ message: "No payment intent found" });
+      }
+
+      // Capture the payment (release from escrow) with platform fee
+      const captured = await stripe.paymentIntents.capture(job.paymentIntentId);
+
+      // Record escrow release transaction
+      await storage.createTransaction({
+        jobId: job.id,
+        payerId: job.posterId,
+        payeeId: job.claimerId || undefined,
+        type: 'escrow_release',
+        amount: job.fee,
+        platformFee: job.platformFee || '0',
+        netAmount: job.payoutAmount || job.fee,
+        stripePaymentIntentId: job.paymentIntentId,
+        status: 'completed',
+      });
+
+      // Record platform fee transaction
+      await storage.createTransaction({
+        jobId: job.id,
+        payerId: job.posterId,
+        type: 'platform_fee',
+        amount: job.platformFee || '0',
+        stripePaymentIntentId: job.paymentIntentId,
+        status: 'completed',
+      });
+
+      const updated = await storage.updateJob(req.params.id, {
+        status: 'completed',
+        paymentReleased: true,
+      });
+
+      // Update agent stats
+      if (job.claimerId) {
+        const claimer = await storage.getUser(job.claimerId);
+        if (claimer) {
+          await storage.upsertUser({
+            ...claimer,
+            totalJobs: (claimer.totalJobs || 0) + 1,
+            completedJobs: (claimer.completedJobs || 0) + 1,
+          });
+        }
+      }
+
+      // Notify claimer of payment
+      if (job.claimerId) {
+        await storage.createNotification({
+          userId: job.claimerId,
+          type: 'payment_received',
+          title: 'Payment Received',
+          message: `You've received $${job.payoutAmount} for the job at ${job.propertyAddress}`,
+          jobId: job.id,
+        });
+      }
+
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get my posted jobs
+  app.get("/api/my-jobs/posted", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const jobs = await storage.getMyPostedJobs(userId);
+      res.json(jobs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get my claimed jobs
+  app.get("/api/my-jobs/claimed", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const jobs = await storage.getMyClaimedJobs(userId);
+      res.json(jobs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ==================== Message Routes ====================
+  
+  // Get messages for a job
+  app.get("/api/jobs/:jobId/messages", isAuthenticated, async (req: any, res) => {
+    try {
+      const messages = await storage.getJobMessages(req.params.jobId);
+      
+      // Fetch sender info for each message
+      const messagesWithSender = await Promise.all(
+        messages.map(async (msg) => {
+          const sender = await storage.getUser(msg.senderId);
+          return { ...msg, sender };
+        })
+      );
+      
+      res.json(messagesWithSender);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Send message
+  app.post("/api/jobs/:jobId/messages", isAuthenticated, async (req: any, res) => {
+    try {
+      const validatedData = insertMessageSchema.parse(req.body);
+      const message = await storage.createMessage(validatedData);
+      res.json(message);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ==================== Review Routes ====================
+  
+  // Submit review
+  app.post("/api/jobs/:jobId/review", isAuthenticated, async (req: any, res) => {
+    try {
+      const validatedData = insertReviewSchema.parse(req.body);
+      const review = await storage.createReview(validatedData);
+      res.json(review);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ==================== Notification Routes ====================
+  
+  app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const notifications = await storage.getUserNotifications(userId);
+      res.json(notifications);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ==================== Payment Routes ====================
+  
+  app.post("/api/create-payment-intent", isAuthenticated, async (req, res) => {
+    try {
+      const { amount } = req.body;
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(amount * 100),
+        currency: "usd",
+        automatic_payment_methods: { enabled: true },
+      });
+      res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ==================== WebSocket Server ====================
+  
   const httpServer = createServer(app);
+  
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  
+  wss.on('connection', (ws: WebSocket) => {
+    console.log('WebSocket client connected');
+
+    ws.on('message', (data: string) => {
+      // Broadcast message to all connected clients
+      wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(data);
+        }
+      });
+    });
+
+    ws.on('close', () => {
+      console.log('WebSocket client disconnected');
+    });
+  });
 
   return httpServer;
 }
