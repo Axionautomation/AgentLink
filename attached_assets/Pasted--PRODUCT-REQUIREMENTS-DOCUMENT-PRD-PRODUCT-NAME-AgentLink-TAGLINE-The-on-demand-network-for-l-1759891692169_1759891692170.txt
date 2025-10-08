@@ -1,0 +1,393 @@
+🧾 PRODUCT REQUIREMENTS DOCUMENT (PRD)
+PRODUCT NAME
+
+AgentLink
+
+TAGLINE
+
+The on-demand network for licensed real estate professionals.
+
+OVERVIEW
+
+AgentLink connects licensed real estate agents who need temporary coverage (for showings or open houses) with qualified local agents available to perform the job — like Uber for realtors. The system uses GPS verification, escrow payments, and in-app chat to ensure accountability, transparency, and seamless coordination.
+
+The MVP will focus on matching, job posting, secure payments, and verified check-in/out through GPS. Later versions will integrate AI for optimized matching, scheduling, and performance analytics.
+
+OBJECTIVES
+
+Enable on-demand coverage: Allow agents to post and claim showing/open-house jobs.
+
+Ensure trust and compliance: Verify all agents’ licenses and attendance (via GPS).
+
+Provide seamless communication: Real-time chat and status updates.
+
+Automate payments: Escrow and payout upon completion.
+
+Lay the foundation for scalable AI-driven matching and analytics.
+
+CORE USERS
+User Type	Description	Key Needs
+Listing Agent	Posts jobs needing coverage for showings/open houses.	Reliability, verified attendance, simple posting flow.
+Covering Agent	Accepts and performs jobs for pay.	Nearby opportunities, GPS check-in/out, payment tracking.
+Admin (Platform)	Oversees user verification, payments, disputes, and analytics.	Dashboard, controls, user database, payment logs.
+KEY FEATURES (MVP)
+1. Authentication & Profile Verification
+
+Email/SMS sign-up & login.
+
+License verification via third-party API (e.g., ARELLO or manual upload).
+
+Profile: name, license ID, brokerage, photo, ratings, completed jobs.
+
+Two-factor authentication for security.
+
+2. Job Marketplace
+
+Map-based and list-based view of available jobs.
+
+Filters: distance, pay rate, time, property type.
+
+Job cards show:
+
+Address (approximate until claimed)
+
+Time window
+
+Fee
+
+Property type
+
+Job description
+
+Client instructions (hidden until claim)
+
+“Claim Job” button → confirmation + payment escrow hold.
+
+Real-time job updates (Socket.IO or Firebase).
+
+3. Job Creation (For Listing Agents)
+
+Input fields:
+
+Property address (Google Maps autocomplete)
+
+Date & time
+
+Job type: showing / open house
+
+Special instructions
+
+Fee offered
+
+Payment collected upfront (Stripe integration).
+
+Job visible instantly on marketplace.
+
+4. GPS Check-In / Check-Out
+
+Required for both agents (poster & worker) to validate activity.
+
+Agent must:
+
+Check in within a 200ft radius of property.
+
+Check out after job.
+
+Timestamps and geolocation stored.
+
+Optional automatic verification via geofencing.
+
+5. Messaging / Chat
+
+Secure, in-app chat between job poster and covering agent.
+
+File & photo upload (e.g., showing feedback or sign-in sheet).
+
+Auto-generated chat templates (“Arrived at property,” “Client running late,” etc.).
+
+End-to-end encryption.
+
+6. Payments & Escrow
+
+Payment collected when job is posted.
+
+Funds held in escrow (Stripe Connect).
+
+On completion & confirmation:
+
+Platform fee deducted (20% default).
+
+Remaining funds transferred to agent.
+
+Refund logic for cancellations:
+
+Before 24 hours = full refund.
+
+Within 24 hours = partial refund.
+
+7. Reviews & Ratings
+
+Post-job feedback:
+
+1–5 star rating.
+
+Quick feedback categories (communication, professionalism, punctuality).
+
+Aggregate rating displayed on agent profile.
+
+Dispute flag system.
+
+8. Notifications
+
+Push notifications for:
+
+New job posts nearby.
+
+Job confirmations.
+
+Payment receipts.
+
+Job reminders.
+
+SMS fallback for time-sensitive alerts.
+
+9. Admin Portal (Internal Use)
+
+Manage users, payments, disputes.
+
+View all active/inactive jobs.
+
+Manual override on escrow releases if needed.
+
+Analytics dashboard: job volume, region heatmaps, revenue, growth.
+
+USER FLOW SUMMARIES
+Listing Agent Flow
+
+Login → “Create Job”
+
+Enter details, payment → confirm post.
+
+Job appears on marketplace.
+
+Agent claims → gets agent info.
+
+Chat and monitor GPS status.
+
+Confirm completion → release payment.
+
+Covering Agent Flow
+
+Login → view marketplace.
+
+Filter by proximity or time.
+
+Claim job → escrow initiated.
+
+Navigate to property.
+
+Check-in/out with GPS.
+
+Payment released after confirmation.
+
+APP ARCHITECTURE OVERVIEW
+
+Frontend:
+
+React Native (cross-platform iOS/Android)
+
+Tailwind RN or Styled Components for design
+
+Real-time updates via Firebase or Socket.IO
+
+Backend:
+
+Node.js + Express
+
+PostgreSQL (primary database)
+
+Firebase for push notifications
+
+Stripe Connect for payments
+
+AWS S3 for media
+
+Google Maps API for geolocation
+
+AI/Automation (Phase 2):
+
+Matching algorithm based on:
+
+Distance
+
+Past performance
+
+Availability
+
+Rating
+
+Predictive scheduling optimization for covering agents.
+
+Automated reminders and follow-up messages.
+
+UI/UX REQUIREMENTS
+1. Home Page (Web / Landing)
+
+Purpose: Public-facing site for signups and info.
+
+Modern minimalist hero section: “On-demand coverage for licensed agents.”
+
+CTA buttons: “Find Coverage” / “Start Earning”
+
+Explainer animation or mock workflow
+
+Testimonials / Trust badges (MLS partners, brokerages)
+
+Footer: Legal, FAQ, Contact.
+
+2. Login / Create Account
+
+Simple two-step flow: email → password → verify license.
+
+Clean white/orange color theme (AgentLink brand).
+
+Optional brokerage signup for multi-user management.
+
+3. Dashboard / Marketplace (Main App View)
+
+Map view: pins for available jobs.
+
+List view toggle.
+
+Filter bar (fee range, time, distance, job type).
+
+Quick access tabs:
+
+“My Jobs”
+
+“Available”
+
+“Messages”
+
+“Wallet”
+
+4. Job Detail Page
+
+Property photo (if provided)
+
+Fee, address, time, job notes.
+
+“Claim Job” CTA (with confirmation modal).
+
+Agent stats (if applicable).
+
+5. Messaging Page
+
+Chat threads sorted by active jobs.
+
+Quick message templates.
+
+Read receipts and delivery indicators.
+
+6. Payment / Wallet Page
+
+Earnings summary.
+
+Pending payouts.
+
+Connected bank account setup (Stripe Connect).
+
+Transaction history.
+
+7. Profile Page
+
+Name, license, rating, total jobs completed.
+
+Verification badge.
+
+Editable info (bio, brokerage, contact).
+
+8. Admin Dashboard (Web Only)
+
+Metrics overview: total jobs, escrow funds, active users.
+
+Manual review of disputes.
+
+Automated payout logs.
+
+NON-FUNCTIONAL REQUIREMENTS
+Category	Requirement
+Performance	Job listings load < 2s; Chat latency < 500ms.
+Security	End-to-end encryption for chats; token-based auth.
+Scalability	Designed for 100K+ concurrent users.
+Reliability	99.9% uptime target.
+Compliance	Must verify license validity in each supported region.
+Accessibility	WCAG 2.1 AA compliant UI.
+FUTURE PHASES (POST-MVP)
+
+AI Matching & Smart Scheduling
+Predictive job recommendations and scheduling optimizer.
+
+Brokerage-Level Tools
+Brokerage dashboard for assigning internal agents or tracking coverage history.
+
+Smart Reporting
+Automated showing summaries, client feedback collection, analytics for agents.
+
+API Integrations
+Integrate with CRMs (FollowUpBoss, BoomTown, etc.) for seamless sync.
+
+🧩 DEVELOPMENT INSTRUCTIONS
+Step 1: Core Backend Setup
+
+Create Node.js + Express API with PostgreSQL.
+
+Integrate Stripe Connect.
+
+Implement authentication and license verification system.
+
+Set up Google Maps + Firebase for notifications.
+
+Step 2: Mobile App (React Native)
+
+Build UI per above layout.
+
+Integrate real-time job updates via sockets.
+
+Build GPS geofencing and check-in/out validation.
+
+Step 3: Admin Web App
+
+Simple React dashboard connected to API.
+
+CRUD for users, jobs, payments.
+
+Step 4: Security & Testing
+
+End-to-end encryption for messages.
+
+Load testing for >1000 concurrent users.
+
+Full unit and integration testing.
+
+Step 5: Launch Infrastructure
+
+Host API on AWS ECS / Vercel.
+
+Database on RDS.
+
+CDN for static assets.
+
+CI/CD via GitHub Actions.
+
+METRICS FOR SUCCESS
+
+Avg. time-to-fill job < 15 minutes.
+
+Completion rate > 95%.
+
+Agent satisfaction rating > 4.5 stars.
+
+Churn rate < 10% per quarter.
+
+Monthly transaction growth > 20%.
