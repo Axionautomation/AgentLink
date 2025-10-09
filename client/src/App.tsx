@@ -16,6 +16,8 @@ import Profile from "@/pages/Profile";
 import MyJobs from "@/pages/MyJobs";
 import Wallet from "@/pages/Wallet";
 import AdminLicenses from "@/pages/AdminLicenses";
+import Checkout from "@/pages/Checkout";
+import PaymentSuccess from "@/pages/PaymentSuccess";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -28,6 +30,8 @@ function Router() {
         <>
           <Route path="/" component={Dashboard} />
           <Route path="/create-job" component={CreateJob} />
+          <Route path="/checkout/:jobId" component={Checkout} />
+          <Route path="/payment-success" component={PaymentSuccess} />
           <Route path="/jobs/:id" component={JobDetail} />
           <Route path="/jobs/:jobId/review" component={Review} />
           <Route path="/messages/:jobId" component={Messages} />

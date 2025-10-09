@@ -78,15 +78,15 @@ export default function CreateJob() {
       };
       
       const response = await apiRequest("POST", "/api/jobs", jobData);
-      return response;
+      return response.json();
     },
-    onSuccess: (data) => {
+    onSuccess: (data: any) => {
       toast({
-        title: "Job Posted!",
-        description: "Your job has been posted to the marketplace.",
+        title: "Job Created!",
+        description: "Complete payment to post your job to the marketplace.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
-      setLocation(`/jobs/${data.id}`);
+      setLocation(`/checkout/${data.id}`);
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {
