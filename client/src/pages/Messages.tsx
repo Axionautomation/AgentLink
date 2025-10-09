@@ -30,9 +30,13 @@ export default function Messages() {
   const [messageText, setMessageText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [otherUserTyping, setOtherUserTyping] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingHeartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const otherUserTypingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -55,51 +59,98 @@ export default function Messages() {
   const { data: messages = [], isLoading } = useQuery<MessageWithSender[]>({
     queryKey: [`/api/jobs/${jobId}/messages`],
     enabled: !!jobId,
+    refetchInterval: wsConnected ? false : 3000, // Poll every 3 seconds when WebSocket is down
   });
 
-  // WebSocket connection for real-time updates
+  // WebSocket connection with reconnection logic
   useEffect(() => {
     if (!jobId || !user) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 5;
 
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-    };
+    const connectWebSocket = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        
-        if (data.type === 'new_message' && data.jobId === jobId) {
-          // Refresh messages when new message arrives
-          queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/messages`] });
-        } else if (data.type === 'typing' && data.jobId === jobId && data.userId !== user.id) {
-          setOtherUserTyping(true);
-          // Clear typing indicator after 3 seconds
-          setTimeout(() => setOtherUserTyping(false), 3000);
-        } else if (data.type === 'stop_typing' && data.jobId === jobId && data.userId !== user.id) {
-          setOtherUserTyping(false);
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        setWsConnected(true);
+        reconnectAttempts = 0;
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'new_message' && data.jobId === jobId) {
+            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/messages`] });
+          } else if (data.type === 'typing' && data.jobId === jobId && data.userId !== user.id) {
+            setOtherUserTyping(true);
+            
+            // Clear previous timeout
+            if (otherUserTypingTimeoutRef.current) {
+              clearTimeout(otherUserTypingTimeoutRef.current);
+            }
+            
+            // Set new timeout to clear typing indicator
+            otherUserTypingTimeoutRef.current = setTimeout(() => {
+              setOtherUserTyping(false);
+            }, 3000);
+          } else if (data.type === 'stop_typing' && data.jobId === jobId && data.userId !== user.id) {
+            if (otherUserTypingTimeoutRef.current) {
+              clearTimeout(otherUserTypingTimeoutRef.current);
+            }
+            setOtherUserTyping(false);
+          }
+        } catch (error) {
+          console.error('WebSocket message parse error:', error);
         }
-      } catch (error) {
-        console.error('WebSocket message parse error:', error);
-      }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        setWsConnected(false);
+        
+        // Attempt reconnection with exponential backoff
+        if (reconnectAttempts < maxReconnectAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+          console.log(`Reconnecting in ${delay}ms...`);
+          
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectAttempts++;
+            connectWebSocket();
+          }, delay);
+        } else {
+          // Fallback to polling if WebSocket fails
+          console.log('Max reconnection attempts reached, falling back to polling');
+        }
+      };
     };
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-    };
+    connectWebSocket();
 
     return () => {
-      ws.close();
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (otherUserTypingTimeoutRef.current) {
+        clearTimeout(otherUserTypingTimeoutRef.current);
+      }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      if (typingHeartbeatRef.current) {
+        clearInterval(typingHeartbeatRef.current);
+      }
+      wsRef.current?.close();
     };
   }, [jobId, user]);
 
@@ -118,14 +169,8 @@ export default function Messages() {
       setMessageText("");
       queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/messages`] });
       
-      // Broadcast new message via WebSocket
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'new_message',
-          jobId,
-          userId: user?.id,
-        }));
-      }
+      // Server handles broadcasting to all connected clients
+      // No need for client-side broadcast
       
       // Stop typing indicator
       handleStopTyping();
@@ -150,35 +195,60 @@ export default function Messages() {
     },
   });
 
-  // Typing indicator handlers
+  // Typing indicator handlers with heartbeat
   const handleTyping = useCallback(() => {
-    if (!isTyping && wsRef.current?.readyState === WebSocket.OPEN) {
+    const sendTypingEvent = () => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'typing',
+          jobId,
+          userId: user?.id,
+        }));
+      }
+    };
+
+    if (!isTyping) {
       setIsTyping(true);
-      wsRef.current.send(JSON.stringify({
-        type: 'typing',
-        jobId,
-        userId: user?.id,
-      }));
+      sendTypingEvent();
+      
+      // Send periodic heartbeats every 2 seconds while typing
+      typingHeartbeatRef.current = setInterval(sendTypingEvent, 2000);
     }
 
-    // Reset typing timeout
+    // Reset stop-typing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
 
     typingTimeoutRef.current = setTimeout(() => {
       handleStopTyping();
-    }, 2000);
+    }, 3000); // Stop after 3 seconds of no input
   }, [isTyping, jobId, user?.id]);
 
   const handleStopTyping = useCallback(() => {
-    if (isTyping && wsRef.current?.readyState === WebSocket.OPEN) {
+    if (isTyping) {
       setIsTyping(false);
-      wsRef.current.send(JSON.stringify({
-        type: 'stop_typing',
-        jobId,
-        userId: user?.id,
-      }));
+      
+      // Clear heartbeat interval
+      if (typingHeartbeatRef.current) {
+        clearInterval(typingHeartbeatRef.current);
+        typingHeartbeatRef.current = null;
+      }
+      
+      // Send stop typing event
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'stop_typing',
+          jobId,
+          userId: user?.id,
+        }));
+      }
+    }
+    
+    // Clear timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
     }
   }, [isTyping, jobId, user?.id]);
 

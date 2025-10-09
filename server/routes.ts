@@ -498,6 +498,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const validatedData = insertMessageSchema.parse(req.body);
       const message = await storage.createMessage(validatedData);
+      
+      // Broadcast to all connected WebSocket clients immediately
+      const wss = app.locals.wss;
+      if (wss) {
+        const broadcast = JSON.stringify({
+          type: 'new_message',
+          jobId: req.params.jobId,
+          userId: validatedData.senderId,
+        });
+        
+        wss.clients.forEach((client: WebSocket) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(broadcast);
+          }
+        });
+      }
+      
       res.json(message);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -702,6 +719,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  
+  // Store WebSocket server in app.locals for access in routes
+  app.locals.wss = wss;
   
   wss.on('connection', (ws: WebSocket) => {
     console.log('WebSocket client connected');
