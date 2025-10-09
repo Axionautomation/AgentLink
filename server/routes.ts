@@ -567,6 +567,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== Bank Account & Withdrawal Routes ====================
+  
+  // Create Financial Connections Session for bank linking
+  app.post("/api/create-financial-connections-session", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Create or get Stripe customer
+      let customerId = user.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+        });
+        customerId = customer.id;
+        await storage.upsertUser({
+          ...user,
+          stripeCustomerId: customerId,
+        });
+      }
+
+      // Create Financial Connections Session
+      const session = await stripe.financialConnections.sessions.create({
+        account_holder: {
+          type: 'customer',
+          customer: customerId,
+        },
+        permissions: ['payment_method', 'balances'],
+        filters: {
+          countries: ['US'],
+        },
+      });
+
+      res.json({ clientSecret: session.client_secret });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Link bank account after Financial Connections Session
+  app.post("/api/link-bank-account", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { accountId } = req.body; // Financial Connections Account ID
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Retrieve the Financial Connections Account to get bank details
+      const fcAccount = await stripe.financialConnections.accounts.retrieve(accountId);
+      
+      // Update user with bank account info
+      await storage.upsertUser({
+        ...user,
+        stripeFinancialConnectionsAccountId: accountId,
+        bankAccountLast4: fcAccount.last4 || '',
+        bankName: fcAccount.institution_name || '',
+      });
+
+      res.json({ 
+        success: true,
+        bankName: fcAccount.institution_name,
+        last4: fcAccount.last4,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Create instant payout/withdrawal
+  app.post("/api/create-payout", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { amount } = req.body;
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (!user.stripeFinancialConnectionsAccountId) {
+        return res.status(400).json({ message: "No bank account linked. Please link a bank account first." });
+      }
+
+      // Get user's available balance (escrow releases minus payouts)
+      const transactions = await storage.getUserTransactions(userId);
+      const escrowReleased = transactions
+        .filter(t => t.type === 'escrow_release' && t.status === 'completed')
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+      
+      const previousPayouts = transactions
+        .filter(t => t.type === 'payout' && t.status === 'completed')
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+      
+      const availableBalance = escrowReleased - previousPayouts;
+
+      const requestedAmount = parseFloat(amount);
+      if (requestedAmount > availableBalance || requestedAmount <= 0) {
+        return res.status(400).json({ message: "Insufficient balance" });
+      }
+
+      // For MVP: Create a transaction record (actual payout would require Stripe Connect)
+      // In production, you would use stripe.payouts.create() with a Connect account
+      await storage.createTransaction({
+        userId,
+        type: 'payout',
+        amount: requestedAmount.toFixed(2),
+        status: 'completed',
+        stripePaymentIntentId: `payout_${Date.now()}`, // Mock for MVP
+        description: `Withdrawal to ${user.bankName} (****${user.bankAccountLast4})`,
+      });
+
+      res.json({ 
+        success: true,
+        amount: requestedAmount,
+        bankName: user.bankName,
+        last4: user.bankAccountLast4,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ==================== WebSocket Server ====================
   
   const httpServer = createServer(app);

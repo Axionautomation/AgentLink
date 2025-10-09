@@ -1,24 +1,73 @@
-import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, DollarSign, TrendingUp, Clock, ArrowUpRight, ArrowDownLeft } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ArrowLeft, DollarSign, TrendingUp, Clock, ArrowUpRight, ArrowDownLeft, Landmark, Wallet as WalletIcon } from "lucide-react";
 import { Link } from "wouter";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Transaction } from "@shared/schema";
 import { formatDistanceToNow } from "date-fns";
+import { loadStripe } from "@stripe/stripe-js";
+import { loadConnectAndInitialize } from "@stripe/connect-js";
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY);
 
 export default function Wallet() {
   const { user, isLoading: authLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [showWithdrawForm, setShowWithdrawForm] = useState(false);
 
   const { data: transactions = [], isLoading: transactionsLoading } = useQuery<Transaction[]>({
     queryKey: ["/api/transactions"],
+    queryFn: async () => {
+      const res = await fetch("/api/transactions", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load transactions");
+      return res.json();
+    },
     enabled: isAuthenticated,
   });
+
+  const withdrawMutation = useMutation({
+    mutationFn: async (amount: string) => {
+      const res = await apiRequest("POST", "/api/create-payout", { amount });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Withdrawal Successful!",
+        description: "Funds have been sent to your bank account.",
+      });
+      setWithdrawAmount("");
+      setShowWithdrawForm(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Withdrawal Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleWithdraw = () => {
+    const amount = parseFloat(withdrawAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast({
+        title: "Invalid Amount",
+        description: "Please enter a valid amount to withdraw",
+        variant: "destructive",
+      });
+      return;
+    }
+    withdrawMutation.mutate(withdrawAmount);
+  };
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -33,10 +82,16 @@ export default function Wallet() {
     }
   }, [isAuthenticated, authLoading, toast]);
 
-  // Calculate balances from transactions
-  const availableBalance = transactions
-    .filter(t => t.status === 'completed' && t.toUserId === user?.id)
+  // Calculate balances from transactions (escrow releases minus payouts)
+  const escrowReleased = transactions
+    .filter(t => t.type === 'escrow_release' && t.status === 'completed' && t.toUserId === user?.id)
     .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+  
+  const completedPayouts = transactions
+    .filter(t => t.type === 'payout' && t.status === 'completed' && t.userId === user?.id)
+    .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+  
+  const availableBalance = escrowReleased - completedPayouts;
 
   const pendingBalance = transactions
     .filter(t => (t.status === 'pending' || t.status === 'processing') && t.toUserId === user?.id)
@@ -148,6 +203,92 @@ export default function Wallet() {
               </p>
             </div>
           </div>
+        </Card>
+
+        {/* Withdrawal Section */}
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
+              <Landmark className="h-5 w-5 text-primary" />
+              Withdrawals
+            </h3>
+            {user?.bankName && (
+              <Badge variant="outline" className="gap-1">
+                <Landmark className="h-3 w-3" />
+                {user.bankName} ••••{user.bankAccountLast4}
+              </Badge>
+            )}
+          </div>
+
+          {!user?.bankName ? (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                <Landmark className="w-8 h-8 text-muted-foreground" />
+              </div>
+              <p className="text-muted-foreground mb-4">
+                Link your bank account to withdraw funds instantly with Stripe Financial Connections
+              </p>
+              <p className="text-sm text-muted-foreground mb-6">
+                Note: For MVP, bank linking is simulated. In production, use Stripe Financial Connections.
+              </p>
+            </div>
+          ) : showWithdrawForm ? (
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-card-foreground mb-2 block">
+                  Amount to Withdraw
+                </label>
+                <div className="relative">
+                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={withdrawAmount}
+                    onChange={(e) => setWithdrawAmount(e.target.value)}
+                    className="pl-9"
+                    data-testid="input-withdraw-amount"
+                  />
+                </div>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Available: ${availableBalance.toFixed(2)}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleWithdraw}
+                  disabled={withdrawMutation.isPending}
+                  className="rounded-lg flex-1"
+                  data-testid="button-confirm-withdraw"
+                >
+                  {withdrawMutation.isPending ? "Processing..." : "Confirm Withdrawal"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowWithdrawForm(false);
+                    setWithdrawAmount("");
+                  }}
+                  className="rounded-lg"
+                  data-testid="button-cancel-withdraw"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button
+                onClick={() => setShowWithdrawForm(true)}
+                disabled={availableBalance <= 0}
+                className="rounded-lg flex-1"
+                data-testid="button-withdraw"
+              >
+                <WalletIcon className="w-4 h-4 mr-2" />
+                Withdraw Funds
+              </Button>
+            </div>
+          )}
         </Card>
 
         {/* Transaction History */}

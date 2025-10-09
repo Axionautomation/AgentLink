@@ -51,6 +51,10 @@ export const users = pgTable("users", {
   // Stripe fields for payments
   stripeCustomerId: varchar("stripe_customer_id"),
   stripeAccountId: varchar("stripe_account_id"), // For Connect payouts
+  stripeFinancialConnectionsAccountId: varchar("stripe_financial_connections_account_id"), // For bank linking
+  stripeExternalAccountId: varchar("stripe_external_account_id"), // For payouts
+  bankAccountLast4: varchar("bank_account_last4"),
+  bankName: varchar("bank_name"),
   
   // Admin access
   isAdmin: boolean("is_admin").default(false),
