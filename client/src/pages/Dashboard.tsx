@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MapPin, List, Clock, DollarSign, Home, Building2, Filter, Search, MapPinned } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { JobMap } from "@/components/JobMap";
 import type { Job } from "@shared/schema";
 import { Link, useLocation } from "wouter";
 
@@ -290,13 +291,10 @@ export default function Dashboard() {
           </div>
         ) : (
           <Card className="p-4">
-            <div className="h-[600px] bg-muted rounded-lg flex items-center justify-center">
-              <div className="text-center space-y-2">
-                <MapPinned className="h-12 w-12 text-muted-foreground mx-auto" />
-                <p className="text-muted-foreground">Map view coming soon</p>
-                <p className="text-sm text-muted-foreground">Switch to list view to see available jobs</p>
-              </div>
-            </div>
+            <JobMap 
+              jobs={filteredJobs} 
+              userLocation={latitude && longitude ? { lat: latitude, lng: longitude } : null}
+            />
           </Card>
         )}
 
