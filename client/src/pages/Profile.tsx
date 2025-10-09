@@ -1,17 +1,51 @@
-import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Star, Briefcase, MapPin, Mail, Phone, LogOut, Shield, Award } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ArrowLeft, Star, Briefcase, MapPin, Mail, Phone, LogOut, Shield, Award, Upload } from "lucide-react";
 import { Link } from "wouter";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Profile() {
   const { user, isLoading: authLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
+  const [licenseNumber, setLicenseNumber] = useState("");
+  const [licenseState, setLicenseState] = useState("");
+  const [licenseDocumentUrl, setLicenseDocumentUrl] = useState("");
+
+  const updateLicenseMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("PATCH", "/api/auth/user/license", {
+        licenseNumber,
+        licenseState,
+        licenseDocumentUrl,
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "License Submitted",
+        description: "Your license has been submitted for verification.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      setLicenseNumber("");
+      setLicenseState("");
+      setLicenseDocumentUrl("");
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to submit license",
+        variant: "destructive",
+      });
+    },
+  });
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -136,7 +170,7 @@ export default function Profile() {
         </Card>
 
         {/* License Info */}
-        {user?.licenseNumber && (
+        {user?.licenseNumber ? (
           <Card className="p-6 space-y-4">
             <h3 className="text-lg font-semibold text-card-foreground">License Information</h3>
             
@@ -162,9 +196,82 @@ export default function Profile() {
                     ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded-full'
                     : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-full'
                 }>
-                  {user.licenseVerified ? 'Verified' : 'Pending'}
+                  {user.licenseVerified ? 'Verified' : 'Pending Verification'}
                 </Badge>
               </div>
+            </div>
+          </Card>
+        ) : (
+          <Card className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-card-foreground">License Verification</h3>
+              <Badge variant="outline" className="rounded-full">
+                Required
+              </Badge>
+            </div>
+            
+            <p className="text-sm text-muted-foreground">
+              Submit your real estate license for verification to start accepting jobs
+            </p>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="licenseNumber">License Number</Label>
+                <Input
+                  id="licenseNumber"
+                  value={licenseNumber}
+                  onChange={(e) => setLicenseNumber(e.target.value)}
+                  placeholder="Enter your license number"
+                  className="rounded-lg"
+                  data-testid="input-license-number"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="licenseState">State</Label>
+                <Select value={licenseState} onValueChange={setLicenseState}>
+                  <SelectTrigger className="rounded-lg" data-testid="select-license-state">
+                    <SelectValue placeholder="Select state" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CA">California</SelectItem>
+                    <SelectItem value="TX">Texas</SelectItem>
+                    <SelectItem value="FL">Florida</SelectItem>
+                    <SelectItem value="NY">New York</SelectItem>
+                    <SelectItem value="IL">Illinois</SelectItem>
+                    <SelectItem value="PA">Pennsylvania</SelectItem>
+                    <SelectItem value="OH">Ohio</SelectItem>
+                    <SelectItem value="GA">Georgia</SelectItem>
+                    <SelectItem value="NC">North Carolina</SelectItem>
+                    <SelectItem value="MI">Michigan</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="licenseDocumentUrl">License Document URL</Label>
+                <Input
+                  id="licenseDocumentUrl"
+                  value={licenseDocumentUrl}
+                  onChange={(e) => setLicenseDocumentUrl(e.target.value)}
+                  placeholder="https://example.com/license.pdf"
+                  className="rounded-lg"
+                  data-testid="input-license-document-url"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Upload your license to a service like Imgur or Google Drive and paste the link
+                </p>
+              </div>
+
+              <Button 
+                onClick={() => updateLicenseMutation.mutate()}
+                disabled={!licenseNumber || !licenseState || !licenseDocumentUrl || updateLicenseMutation.isPending}
+                className="w-full rounded-lg"
+                data-testid="button-submit-license"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                {updateLicenseMutation.isPending ? "Submitting..." : "Submit for Verification"}
+              </Button>
             </div>
           </Card>
         )}

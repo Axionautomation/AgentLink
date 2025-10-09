@@ -1,11 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import MarkerClusterGroup from 'react-leaflet-cluster';
 import { useLocation } from 'wouter';
 import L from 'leaflet';
 import { Home, Building2, DollarSign, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Job } from '@shared/schema';
 import 'leaflet/dist/leaflet.css';
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 
 interface JobWithDistance extends Job {
   distance?: number;
@@ -119,57 +122,59 @@ export function JobMap({ jobs, userLocation }: JobMapProps) {
           </Marker>
         )}
 
-        {jobsWithCoordinates.map((job) => (
-          <Marker
-            key={job.id}
-            position={[parseFloat(job.propertyLat!), parseFloat(job.propertyLng!)]}
-            icon={createCustomIcon(job.fee, job.propertyType)}
-            eventHandlers={{
-              click: () => {
-                setLocation(`/jobs/${job.id}`);
-              },
-            }}
-          >
-            <Popup>
-              <div className="p-2 min-w-[200px]" data-testid={`map-popup-${job.id}`}>
-                <div className="flex items-start gap-2 mb-2">
-                  {job.propertyType === 'showing' ? (
-                    <Home className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-                  ) : (
-                    <Building2 className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+        <MarkerClusterGroup>
+          {jobsWithCoordinates.map((job) => (
+            <Marker
+              key={job.id}
+              position={[parseFloat(job.propertyLat!), parseFloat(job.propertyLng!)]}
+              icon={createCustomIcon(job.fee, job.propertyType)}
+              eventHandlers={{
+                click: () => {
+                  setLocation(`/jobs/${job.id}`);
+                },
+              }}
+            >
+              <Popup>
+                <div className="p-2 min-w-[200px]" data-testid={`map-popup-${job.id}`}>
+                  <div className="flex items-start gap-2 mb-2">
+                    {job.propertyType === 'showing' ? (
+                      <Home className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+                    ) : (
+                      <Building2 className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">{job.propertyAddress}</p>
+                      <p className="text-xs text-muted-foreground capitalize">
+                        {job.propertyType.replace('_', ' ')}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                    <DollarSign className="h-3 w-3" />
+                    <span className="font-mono font-semibold">${parseFloat(job.fee).toFixed(2)}</span>
+                  </div>
+
+                  {job.distance !== undefined && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+                      <MapPin className="h-3 w-3" />
+                      <span>{job.distance.toFixed(1)} mi away</span>
+                    </div>
                   )}
-                  <div className="flex-1">
-                    <p className="font-medium text-sm">{job.propertyAddress}</p>
-                    <p className="text-xs text-muted-foreground capitalize">
-                      {job.propertyType.replace('_', ' ')}
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                  <DollarSign className="h-3 w-3" />
-                  <span className="font-mono font-semibold">${parseFloat(job.fee).toFixed(2)}</span>
-                </div>
 
-                {job.distance !== undefined && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
-                    <MapPin className="h-3 w-3" />
-                    <span>{job.distance.toFixed(1)} mi away</span>
-                  </div>
-                )}
-
-                <Button 
-                  size="sm" 
-                  className="w-full rounded-lg text-xs h-7"
-                  onClick={() => setLocation(`/jobs/${job.id}`)}
-                  data-testid={`button-view-job-map-${job.id}`}
-                >
-                  View Details
-                </Button>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+                  <Button 
+                    size="sm" 
+                    className="w-full rounded-lg text-xs h-7"
+                    onClick={() => setLocation(`/jobs/${job.id}`)}
+                    data-testid={`button-view-job-map-${job.id}`}
+                  >
+                    View Details
+                  </Button>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+        </MarkerClusterGroup>
       </MapContainer>
     </div>
   );

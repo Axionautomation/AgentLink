@@ -52,6 +52,9 @@ export const users = pgTable("users", {
   stripeCustomerId: varchar("stripe_customer_id"),
   stripeAccountId: varchar("stripe_account_id"), // For Connect payouts
   
+  // Admin access
+  isAdmin: boolean("is_admin").default(false),
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

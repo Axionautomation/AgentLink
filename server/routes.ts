@@ -14,6 +14,26 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-11-20.acacia",
 });
 
+// Admin authorization middleware
+const isAdmin = async (req: any, res: any, next: any) => {
+  try {
+    if (!req.user || !req.user.claims || !req.user.claims.sub) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const userId = req.user.claims.sub;
+    const user = await storage.getUser(userId);
+    
+    if (!user || !user.isAdmin) {
+      return res.status(403).json({ message: "Forbidden: Admin access required" });
+    }
+    
+    next();
+  } catch (error) {
+    res.status(500).json({ message: "Authorization check failed" });
+  }
+};
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);
@@ -27,6 +47,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  app.patch('/api/auth/user/license', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { licenseNumber, licenseState, licenseDocumentUrl } = req.body;
+      
+      // Validate required fields
+      if (!licenseNumber || !licenseNumber.trim()) {
+        return res.status(400).json({ message: "License number is required" });
+      }
+      if (!licenseState || !licenseState.trim()) {
+        return res.status(400).json({ message: "License state is required" });
+      }
+      if (!licenseDocumentUrl || !licenseDocumentUrl.trim()) {
+        return res.status(400).json({ message: "License document URL is required" });
+      }
+      
+      const currentUser = await storage.getUser(userId);
+      if (!currentUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Explicitly prevent isAdmin from being changed - preserve existing value
+      const updatedUser = await storage.upsertUser({
+        ...currentUser,
+        licenseNumber: licenseNumber.trim(),
+        licenseState: licenseState.trim(),
+        licenseDocumentUrl: licenseDocumentUrl.trim(),
+        licenseVerified: false,
+        isAdmin: currentUser.isAdmin || false, // Preserve existing admin status
+      });
+
+      res.json(updatedUser);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ==================== Admin Routes ====================
+  
+  app.get('/api/admin/pending-licenses', isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const pendingUsers = await storage.getPendingLicenseUsers();
+      res.json(pendingUsers);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post('/api/admin/approve-license/:userId', isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const { userId } = req.params;
+      const approvedUser = await storage.approveLicense(userId);
+      if (!approvedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      res.json(approvedUser);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
     }
   });
 

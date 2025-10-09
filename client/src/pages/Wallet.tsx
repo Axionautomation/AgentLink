@@ -125,19 +125,27 @@ export default function Wallet() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             <div>
               <p className="text-sm text-muted-foreground mb-1">Today</p>
-              <p className="text-2xl font-bold font-mono text-card-foreground">$0.00</p>
+              <p className="text-2xl font-bold font-mono text-card-foreground" data-testid="text-today-earnings">
+                ${todayEarnings.toFixed(2)}
+              </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground mb-1">This Week</p>
-              <p className="text-2xl font-bold font-mono text-card-foreground">$0.00</p>
+              <p className="text-2xl font-bold font-mono text-card-foreground" data-testid="text-week-earnings">
+                ${weekEarnings.toFixed(2)}
+              </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground mb-1">This Month</p>
-              <p className="text-2xl font-bold font-mono text-card-foreground">$0.00</p>
+              <p className="text-2xl font-bold font-mono text-card-foreground" data-testid="text-month-earnings">
+                ${monthEarnings.toFixed(2)}
+              </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground mb-1">All Time</p>
-              <p className="text-2xl font-bold font-mono text-card-foreground">$0.00</p>
+              <p className="text-2xl font-bold font-mono text-card-foreground" data-testid="text-alltime-earnings">
+                ${allTimeEarnings.toFixed(2)}
+              </p>
             </div>
           </div>
         </Card>
@@ -146,15 +154,81 @@ export default function Wallet() {
         <Card className="p-6">
           <h3 className="text-lg font-semibold text-card-foreground mb-4">Transaction History</h3>
           
-          <div className="text-center py-12">
-            <div className="h-16 w-16 rounded-full bg-muted mx-auto flex items-center justify-center mb-4">
-              <DollarSign className="h-8 w-8 text-muted-foreground" />
+          {transactionsLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-16 bg-muted rounded-lg animate-pulse" />
+              ))}
             </div>
-            <h4 className="text-lg font-semibold text-card-foreground mb-2">No transactions yet</h4>
-            <p className="text-muted-foreground max-w-sm mx-auto">
-              Your payment history will appear here once you complete jobs
-            </p>
-          </div>
+          ) : transactions.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="h-16 w-16 rounded-full bg-muted mx-auto flex items-center justify-center mb-4">
+                <DollarSign className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <h4 className="text-lg font-semibold text-card-foreground mb-2">No transactions yet</h4>
+              <p className="text-muted-foreground max-w-sm mx-auto">
+                Your payment history will appear here once you complete jobs
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {transactions.map((transaction) => {
+                const isIncoming = transaction.toUserId === user?.id;
+                const isOutgoing = transaction.fromUserId === user?.id;
+                
+                return (
+                  <div
+                    key={transaction.id}
+                    className="flex items-center justify-between p-4 rounded-lg border border-border hover-elevate transition-colors"
+                    data-testid={`transaction-${transaction.id}`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`h-10 w-10 rounded-full flex items-center justify-center ${
+                        isIncoming ? 'bg-green-100 dark:bg-green-900/30' : 'bg-muted'
+                      }`}>
+                        {isIncoming ? (
+                          <ArrowDownLeft className="h-5 w-5 text-green-600 dark:text-green-400" />
+                        ) : (
+                          <ArrowUpRight className="h-5 w-5 text-muted-foreground" />
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-medium text-card-foreground">
+                          {isIncoming ? 'Payment received' : 'Payment sent'}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <p className="text-sm text-muted-foreground">
+                            {transaction.type === 'escrow' ? 'Escrow' : 
+                             transaction.type === 'release' ? 'Payment release' : 
+                             transaction.type === 'refund' ? 'Refund' : 
+                             transaction.type === 'platform_fee' ? 'Platform fee' : 
+                             'Payment'}
+                          </p>
+                          <Badge variant={
+                            transaction.status === 'completed' ? 'default' : 
+                            transaction.status === 'pending' ? 'secondary' : 
+                            'outline'
+                          } className="rounded-full text-xs">
+                            {transaction.status}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {formatDistanceToNow(new Date(transaction.createdAt!), { addSuffix: true })}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-lg font-bold font-mono ${
+                        isIncoming ? 'text-green-600 dark:text-green-400' : 'text-card-foreground'
+                      }`}>
+                        {isIncoming ? '+' : '-'}${parseFloat(transaction.amount).toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
 
         {/* Payout Settings */}

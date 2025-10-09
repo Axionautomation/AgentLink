@@ -15,6 +15,7 @@ import Review from "@/pages/Review";
 import Profile from "@/pages/Profile";
 import MyJobs from "@/pages/MyJobs";
 import Wallet from "@/pages/Wallet";
+import AdminLicenses from "@/pages/AdminLicenses";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -33,6 +34,7 @@ function Router() {
           <Route path="/profile" component={Profile} />
           <Route path="/my-jobs" component={MyJobs} />
           <Route path="/wallet" component={Wallet} />
+          <Route path="/admin/licenses" component={AdminLicenses} />
         </>
       )}
       <Route component={NotFound} />

@@ -22,13 +22,15 @@ import {
   type InsertCheckIn,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, desc } from "drizzle-orm";
+import { eq, and, or, desc, isNotNull, sql } from "drizzle-orm";
 
 // Interface for storage operations - includes Replit Auth requirements
 export interface IStorage {
   // User operations (IMPORTANT: mandatory for Replit Auth)
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
+  getPendingLicenseUsers(): Promise<User[]>;
+  approveLicense(userId: string): Promise<User | undefined>;
   
   // Job operations
   createJob(job: InsertJob): Promise<Job>;
@@ -70,16 +72,38 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
+    // Remove isAdmin from userData to prevent privilege escalation
+    const { isAdmin: _, ...safeUserData } = userData as any;
+    
     const [user] = await db
       .insert(users)
-      .values(userData)
+      .values(safeUserData)
       .onConflictDoUpdate({
         target: users.id,
         set: {
-          ...userData,
+          ...safeUserData,
           updatedAt: new Date(),
         },
       })
+      .returning();
+    return user;
+  }
+
+  async getPendingLicenseUsers(): Promise<User[]> {
+    return await db
+      .select()
+      .from(users)
+      .where(and(
+        eq(users.licenseVerified, false),
+        isNotNull(users.licenseNumber)
+      ));
+  }
+
+  async approveLicense(userId: string): Promise<User | undefined> {
+    const [user] = await db
+      .update(users)
+      .set({ licenseVerified: true })
+      .where(eq(users.id, userId))
       .returning();
     return user;
   }
