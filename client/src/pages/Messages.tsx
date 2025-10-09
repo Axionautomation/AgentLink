@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Send, MessageSquare } from "lucide-react";
 import { Link, useParams } from "wouter";
 import type { Message, Job, User } from "@shared/schema";
@@ -27,7 +28,11 @@ export default function Messages() {
   const { user, isLoading: authLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const [messageText, setMessageText] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const [otherUserTyping, setOtherUserTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -50,8 +55,53 @@ export default function Messages() {
   const { data: messages = [], isLoading } = useQuery<MessageWithSender[]>({
     queryKey: [`/api/jobs/${jobId}/messages`],
     enabled: !!jobId,
-    refetchInterval: 3000, // Poll every 3 seconds for new messages
   });
+
+  // WebSocket connection for real-time updates
+  useEffect(() => {
+    if (!jobId || !user) return;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'new_message' && data.jobId === jobId) {
+          // Refresh messages when new message arrives
+          queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/messages`] });
+        } else if (data.type === 'typing' && data.jobId === jobId && data.userId !== user.id) {
+          setOtherUserTyping(true);
+          // Clear typing indicator after 3 seconds
+          setTimeout(() => setOtherUserTyping(false), 3000);
+        } else if (data.type === 'stop_typing' && data.jobId === jobId && data.userId !== user.id) {
+          setOtherUserTyping(false);
+        }
+      } catch (error) {
+        console.error('WebSocket message parse error:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [jobId, user]);
 
   const sendMessageMutation = useMutation({
     mutationFn: async (content: string) => {
@@ -67,6 +117,18 @@ export default function Messages() {
     onSuccess: () => {
       setMessageText("");
       queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/messages`] });
+      
+      // Broadcast new message via WebSocket
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'new_message',
+          jobId,
+          userId: user?.id,
+        }));
+      }
+      
+      // Stop typing indicator
+      handleStopTyping();
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {
@@ -88,6 +150,38 @@ export default function Messages() {
     },
   });
 
+  // Typing indicator handlers
+  const handleTyping = useCallback(() => {
+    if (!isTyping && wsRef.current?.readyState === WebSocket.OPEN) {
+      setIsTyping(true);
+      wsRef.current.send(JSON.stringify({
+        type: 'typing',
+        jobId,
+        userId: user?.id,
+      }));
+    }
+
+    // Reset typing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      handleStopTyping();
+    }, 2000);
+  }, [isTyping, jobId, user?.id]);
+
+  const handleStopTyping = useCallback(() => {
+    if (isTyping && wsRef.current?.readyState === WebSocket.OPEN) {
+      setIsTyping(false);
+      wsRef.current.send(JSON.stringify({
+        type: 'stop_typing',
+        jobId,
+        userId: user?.id,
+      }));
+    }
+  }, [isTyping, jobId, user?.id]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -96,6 +190,15 @@ export default function Messages() {
     e.preventDefault();
     if (messageText.trim()) {
       sendMessageMutation.mutate(messageText.trim());
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMessageText(e.target.value);
+    if (e.target.value.length > 0) {
+      handleTyping();
+    } else {
+      handleStopTyping();
     }
   };
 
@@ -187,7 +290,7 @@ export default function Messages() {
                         rounded-lg p-3
                         ${isSender 
                           ? 'bg-primary text-primary-foreground rounded-br-sm' 
-                          : 'bg-muted text-muted-foreground rounded-bl-sm'
+                          : 'bg-muted text-foreground rounded-bl-sm'
                         }
                       `}
                     >
@@ -208,6 +311,25 @@ export default function Messages() {
               );
             })
           )}
+          
+          {/* Typing Indicator */}
+          {otherUserTyping && (
+            <div className="flex justify-start" data-testid="typing-indicator">
+              <div className="max-w-[70%]">
+                <div className="rounded-lg p-3 bg-muted rounded-bl-sm">
+                  <div className="flex gap-1 items-center">
+                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 px-1">
+                  {otherUser?.firstName} is typing...
+                </p>
+              </div>
+            </div>
+          )}
+          
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
@@ -218,7 +340,7 @@ export default function Messages() {
           <form onSubmit={handleSendMessage} className="flex gap-2">
             <Input
               value={messageText}
-              onChange={(e) => setMessageText(e.target.value)}
+              onChange={handleInputChange}
               placeholder="Type a message..."
               className="flex-1 rounded-lg"
               data-testid="input-message"
