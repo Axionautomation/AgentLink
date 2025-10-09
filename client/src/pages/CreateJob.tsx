@@ -68,9 +68,13 @@ export default function CreateJob() {
 
   const createJobMutation = useMutation({
     mutationFn: async (data: FormData) => {
+      // Convert date string to Date object
+      const scheduledDate = new Date(data.scheduledDate);
+      
       // Convert string fee and duration to proper format
       const jobData = {
         ...data,
+        scheduledDate: scheduledDate.toISOString(),
         fee: parseFloat(data.fee).toFixed(2),
         duration: parseInt(data.duration),
         platformFee: (parseFloat(data.fee) * 0.2).toFixed(2),
