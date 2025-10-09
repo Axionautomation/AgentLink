@@ -448,6 +448,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/notifications/:id/mark-read", isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.markNotificationRead(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ==================== Transaction Routes ====================
+  
+  app.get("/api/transactions", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const transactions = await storage.getUserTransactions(userId);
+      res.json(transactions);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ==================== Payment Routes ====================
   
   app.post("/api/create-payment-intent", isAuthenticated, async (req, res) => {

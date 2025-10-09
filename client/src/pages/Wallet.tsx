@@ -1,15 +1,24 @@
 import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, DollarSign, TrendingUp, Clock } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { ArrowLeft, DollarSign, TrendingUp, Clock, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { Link } from "wouter";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import type { Transaction } from "@shared/schema";
+import { formatDistanceToNow } from "date-fns";
 
 export default function Wallet() {
   const { user, isLoading: authLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
+
+  const { data: transactions = [], isLoading: transactionsLoading } = useQuery<Transaction[]>({
+    queryKey: ["/api/transactions"],
+    enabled: isAuthenticated,
+  });
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -23,6 +32,37 @@ export default function Wallet() {
       }, 500);
     }
   }, [isAuthenticated, authLoading, toast]);
+
+  // Calculate balances from transactions
+  const availableBalance = transactions
+    .filter(t => t.status === 'completed' && t.toUserId === user?.id)
+    .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+  const pendingBalance = transactions
+    .filter(t => (t.status === 'pending' || t.status === 'processing') && t.toUserId === user?.id)
+    .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+  // Calculate earnings by period
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const todayEarnings = transactions
+    .filter(t => t.toUserId === user?.id && new Date(t.createdAt!) >= todayStart)
+    .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+  const weekEarnings = transactions
+    .filter(t => t.toUserId === user?.id && new Date(t.createdAt!) >= weekStart)
+    .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+  const monthEarnings = transactions
+    .filter(t => t.toUserId === user?.id && new Date(t.createdAt!) >= monthStart)
+    .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+  const allTimeEarnings = transactions
+    .filter(t => t.toUserId === user?.id)
+    .reduce((sum, t) => sum + parseFloat(t.amount), 0);
 
   if (authLoading) {
     return (
@@ -57,7 +97,9 @@ export default function Wallet() {
               <DollarSign className="h-5 w-5" />
               <span className="text-sm font-medium">Available Balance</span>
             </div>
-            <p className="text-4xl font-bold font-mono text-card-foreground">$0.00</p>
+            <p className="text-4xl font-bold font-mono text-card-foreground" data-testid="text-available-balance">
+              ${availableBalance.toFixed(2)}
+            </p>
             <p className="text-sm text-muted-foreground">Ready to withdraw</p>
           </Card>
 
@@ -66,7 +108,9 @@ export default function Wallet() {
               <Clock className="h-5 w-5" />
               <span className="text-sm font-medium">Pending</span>
             </div>
-            <p className="text-4xl font-bold font-mono text-card-foreground">$0.00</p>
+            <p className="text-4xl font-bold font-mono text-card-foreground" data-testid="text-pending-balance">
+              ${pendingBalance.toFixed(2)}
+            </p>
             <p className="text-sm text-muted-foreground">In escrow or processing</p>
           </Card>
         </div>

@@ -55,6 +55,7 @@ export interface IStorage {
   // Transaction operations
   createTransaction(transaction: InsertTransaction): Promise<Transaction>;
   getJobTransactions(jobId: string): Promise<Transaction[]>;
+  getUserTransactions(userId: string): Promise<Transaction[]>;
   
   // Check-in operations
   createCheckIn(checkIn: InsertCheckIn): Promise<CheckIn>;
@@ -210,6 +211,14 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(transactions)
       .where(eq(transactions.jobId, jobId))
+      .orderBy(desc(transactions.createdAt));
+  }
+
+  async getUserTransactions(userId: string): Promise<Transaction[]> {
+    return await db
+      .select()
+      .from(transactions)
+      .where(or(eq(transactions.fromUserId, userId), eq(transactions.toUserId, userId)))
       .orderBy(desc(transactions.createdAt));
   }
 

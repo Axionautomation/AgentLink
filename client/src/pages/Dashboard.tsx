@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MapPin, List, Clock, DollarSign, Home, Building2, Filter, Search, MapPinned } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { JobMap } from "@/components/JobMap";
+import { NotificationBell } from "@/components/NotificationBell";
 import type { Job } from "@shared/schema";
 import { Link, useLocation } from "wouter";
 
@@ -119,6 +120,7 @@ export default function Dashboard() {
                 Post Job
               </Button>
             </Link>
+            <NotificationBell />
             <ThemeToggle />
             <Link href="/profile">
               <Button variant="ghost" size="icon" className="rounded-full" data-testid="button-profile">
