@@ -35,6 +35,16 @@ AgentLink is an on-demand marketplace platform connecting real estate agents for
 - License endpoint explicitly preserves isAdmin status (cannot be changed by users)
 - Passed architect security review: No privilege escalation vulnerabilities
 
+**Phase 3: Payment Checkout & Withdrawals**
+- Created dedicated Checkout page with Stripe Payment Element (includes Link by Stripe for one-click payments)
+- Added PaymentSuccess page to handle 3DS authentication redirects
+- Updated CreateJob flow to redirect to checkout instead of inline payment
+- Added bank account fields to users schema (Financial Connections integration ready)
+- Implemented withdrawal/payout system with instant payout endpoints
+- Added withdrawal UI to Wallet page with amount input and bank account display
+- **Critical Security Fix**: Corrected balance calculation to subtract completed payouts from escrow releases (prevents double-withdrawal attacks)
+- All payment and withdrawal features passed architect security review
+
 **Admin Setup Instructions:**
 To create admin users, run SQL directly on the database:
 ```sql
@@ -125,20 +135,27 @@ Note: isAdmin cannot be set via API for security reasons
 #### Notifications
 - `GET /api/notifications` - Get user notifications
 
-#### Payments
-- `POST /api/create-payment-intent` - Create payment intent
+#### Payments & Withdrawals
+- `POST /api/create-payment-intent` - Create payment intent for job posting
+- `POST /api/create-financial-connections-session` - Create Stripe Financial Connections session for bank linking
+- `POST /api/link-bank-account` - Link bank account and store details in user profile
+- `POST /api/create-payout` - Create instant payout with balance validation (escrow releases minus completed payouts)
+- `GET /api/transactions` - Get user's transaction history
 
 ### Frontend Pages
 
 1. **Landing** (`/`) - Hero with login for unauthenticated users
 2. **Dashboard** (`/`) - Map/list toggle, job discovery, filters
-3. **CreateJob** (`/create-job`) - Job posting form with Stripe payment
-4. **JobDetail** (`/jobs/:id`) - Job details, claim, check-in/out, complete actions
-5. **Messages** (`/messages/:jobId`) - Real-time chat interface
-6. **Review** (`/jobs/:jobId/review`) - Star rating and feedback form
-7. **Profile** (`/profile`) - Agent profile with stats and license info
-8. **MyJobs** (`/my-jobs`) - Tabs for posted/claimed jobs
-9. **Wallet** (`/wallet`) - Earnings and transaction history
+3. **CreateJob** (`/create-job`) - Job posting form (redirects to checkout)
+4. **Checkout** (`/checkout`) - Stripe Payment Element with Link by Stripe for one-click payments
+5. **PaymentSuccess** (`/payment-success`) - Post-payment confirmation and 3DS redirect handler
+6. **JobDetail** (`/jobs/:id`) - Job details, claim, check-in/out, complete actions
+7. **Messages** (`/messages/:jobId`) - Real-time chat interface
+8. **Review** (`/jobs/:jobId/review`) - Star rating and feedback form
+9. **Profile** (`/profile`) - Agent profile with stats and license info
+10. **MyJobs** (`/my-jobs`) - Tabs for posted/claimed jobs
+11. **Wallet** (`/wallet`) - Earnings, withdrawals, and transaction history
+12. **AdminLicenses** (`/admin/licenses`) - Admin review queue for license verification
 
 ### Design System
 
