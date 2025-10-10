@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import type { Request, Response, NextFunction } from 'express';
 
 if (!process.env.JWT_SECRET) {

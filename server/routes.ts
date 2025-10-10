@@ -612,23 +612,10 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     try {
       const validatedData = insertMessageSchema.parse(req.body);
       const message = await storage.createMessage(validatedData);
-      
-      // Broadcast to all connected WebSocket clients immediately
-      const wss = app.locals.wss;
-      if (wss) {
-        const broadcast = JSON.stringify({
-          type: 'new_message',
-          jobId: req.params.jobId,
-          userId: validatedData.senderId,
-        });
-        
-        wss.clients.forEach((client: WebSocket) => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(broadcast);
-          }
-        });
-      }
-      
+
+      // Note: Real-time updates handled by client polling in edge environment
+      // WebSocket broadcasting only available in development server
+
       res.json(message);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
