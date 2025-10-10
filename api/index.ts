@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import express from 'express';
-import { registerRoutes } from '../server/routes';
+import { registerRoutesOnly } from '../server/routes';
 
 let app: express.Application | null = null;
 
@@ -11,8 +11,8 @@ async function initializeApp() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
-  // Register API routes only
-  await registerRoutes(app);
+  // Register API routes only (without WebSocket server for serverless)
+  await registerRoutesOnly(app);
 
   return app;
 }

@@ -42,7 +42,8 @@ const isAdmin = async (req: AuthRequest, res: any, next: any) => {
   }
 };
 
-export async function registerRoutes(app: Express): Promise<Server> {
+// Register routes without WebSocket server (for serverless)
+export async function registerRoutesOnly(app: Express): Promise<void> {
   // ==================== Auth Routes ====================
 
   // Register new user
@@ -827,15 +828,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+}
+
+// Register routes WITH WebSocket server (for development server)
+export async function registerRoutes(app: Express): Promise<Server> {
+  // Register all HTTP routes
+  await registerRoutesOnly(app);
+
   // ==================== WebSocket Server ====================
-  
+
   const httpServer = createServer(app);
-  
+
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
-  
+
   // Store WebSocket server in app.locals for access in routes
   app.locals.wss = wss;
-  
+
   wss.on('connection', (ws: WebSocket) => {
     console.log('WebSocket client connected');
 
