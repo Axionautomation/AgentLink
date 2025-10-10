@@ -2,11 +2,6 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import express from 'express';
 import { registerRoutesOnly } from '../server/routes';
 
-// Configure this function to use Edge Runtime for better performance
-export const config = {
-  runtime: 'edge',
-};
-
 let app: express.Application | null = null;
 
 async function initializeApp() {
