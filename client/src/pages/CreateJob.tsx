@@ -22,6 +22,11 @@ const formSchema = insertJobSchema.extend({
   scheduledTime: z.string().min(1, "Time is required"),
   duration: z.string().min(1, "Duration is required"),
   fee: z.string().min(1, "Fee is required"),
+  addressLine1: z.string().min(1, "Address line 1 is required"),
+  addressLine2: z.string().optional(),
+  city: z.string().min(1, "City is required"),
+  state: z.string().min(1, "State is required"),
+  zipCode: z.string().min(1, "ZIP code is required"),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -36,6 +41,11 @@ export default function CreateJob() {
     defaultValues: {
       posterId: "",
       propertyAddress: "",
+      addressLine1: "",
+      addressLine2: "",
+      city: "",
+      state: "",
+      zipCode: "",
       propertyType: "showing",
       scheduledDate: "",
       scheduledTime: "",
@@ -70,17 +80,36 @@ export default function CreateJob() {
     mutationFn: async (data: FormData) => {
       // Convert date string to Date object
       const scheduledDate = new Date(data.scheduledDate);
-      
+
+      // Build full address
+      const fullAddress = `${data.addressLine1}${data.addressLine2 ? ', ' + data.addressLine2 : ''}, ${data.city}, ${data.state} ${data.zipCode}`;
+
+      // Geocode the address using OpenStreetMap Nominatim API
+      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullAddress)}`;
+      const geocodeResponse = await fetch(geocodeUrl);
+      const geocodeData = await geocodeResponse.json();
+
+      let propertyLat = null;
+      let propertyLng = null;
+
+      if (geocodeData && geocodeData.length > 0) {
+        propertyLat = geocodeData[0].lat;
+        propertyLng = geocodeData[0].lon;
+      }
+
       // Convert string fee and duration to proper format
       const jobData = {
         ...data,
+        propertyAddress: fullAddress,
+        propertyLat,
+        propertyLng,
         scheduledDate: scheduledDate.toISOString(),
         fee: parseFloat(data.fee).toFixed(2),
         duration: parseInt(data.duration),
         platformFee: (parseFloat(data.fee) * 0.2).toFixed(2),
         payoutAmount: (parseFloat(data.fee) * 0.8).toFixed(2),
       };
-      
+
       const response = await apiRequest("POST", "/api/jobs", jobData);
       return response.json();
     },
@@ -143,27 +172,110 @@ export default function CreateJob() {
         <Card className="p-6">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <FormField
-                control={form.control}
-                name="propertyAddress"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Property Address *</FormLabel>
-                    <FormControl>
-                      <div className="relative">
-                        <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                  <MapPin className="h-5 w-5 text-primary" />
+                  Property Address
+                </h3>
+
+                <FormField
+                  control={form.control}
+                  name="addressLine1"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Address Line 1 *</FormLabel>
+                      <FormControl>
                         <Input
                           {...field}
-                          placeholder="123 Main Street, City, ST 12345"
-                          className="pl-9 rounded-lg"
-                          data-testid="input-address"
+                          placeholder="123 Main Street"
+                          className="rounded-lg"
+                          data-testid="input-address-line-1"
                         />
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="addressLine2"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Address Line 2 (Optional)</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          placeholder="Apt, Suite, Unit, etc."
+                          className="rounded-lg"
+                          data-testid="input-address-line-2"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="city"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>City *</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="City"
+                            className="rounded-lg"
+                            data-testid="input-city"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="state"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>State *</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="ST"
+                            maxLength={2}
+                            className="rounded-lg uppercase"
+                            data-testid="input-state"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="zipCode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>ZIP Code *</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="12345"
+                            className="rounded-lg font-mono"
+                            data-testid="input-zip"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <FormField

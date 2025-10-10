@@ -3,7 +3,15 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import Stripe from "stripe";
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./replitAuth";
+import {
+  authenticateToken,
+  hashPassword,
+  comparePassword,
+  generateToken,
+  isValidEmail,
+  isValidPassword,
+  type AuthRequest
+} from "./auth";
 import { insertJobSchema, insertMessageSchema, insertReviewSchema } from "@shared/schema";
 
 // Initialize Stripe
@@ -15,19 +23,19 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 });
 
 // Admin authorization middleware
-const isAdmin = async (req: any, res: any, next: any) => {
+const isAdmin = async (req: AuthRequest, res: any, next: any) => {
   try {
-    if (!req.user || !req.user.claims || !req.user.claims.sub) {
+    if (!req.user || !req.user.userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    
-    const userId = req.user.claims.sub;
+
+    const userId = req.user.userId;
     const user = await storage.getUser(userId);
-    
+
     if (!user || !user.isAdmin) {
       return res.status(403).json({ message: "Forbidden: Admin access required" });
     }
-    
+
     next();
   } catch (error) {
     res.status(500).json({ message: "Authorization check failed" });
@@ -35,24 +43,129 @@ const isAdmin = async (req: any, res: any, next: any) => {
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Auth middleware
-  await setupAuth(app);
-
   // ==================== Auth Routes ====================
-  app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
+
+  // Register new user
+  app.post('/api/auth/register', async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-      res.json(user);
-    } catch (error) {
-      console.error("Error fetching user:", error);
-      res.status(500).json({ message: "Failed to fetch user" });
+      const { email, password, firstName, lastName } = req.body;
+
+      // Validate input
+      if (!email || !password) {
+        return res.status(400).json({ message: 'Email and password are required' });
+      }
+
+      if (!isValidEmail(email)) {
+        return res.status(400).json({ message: 'Invalid email format' });
+      }
+
+      const passwordValidation = isValidPassword(password);
+      if (!passwordValidation.valid) {
+        return res.status(400).json({ message: passwordValidation.message });
+      }
+
+      // Check if user already exists
+      const existingUser = await storage.getUserByEmail(email);
+      if (existingUser) {
+        return res.status(400).json({ message: 'User already exists with this email' });
+      }
+
+      // Hash password
+      const hashedPassword = await hashPassword(password);
+
+      // Create user
+      const user = await storage.upsertUser({
+        email,
+        password: hashedPassword,
+        firstName: firstName || '',
+        lastName: lastName || '',
+      });
+
+      // Generate JWT token
+      const token = generateToken({ userId: user.id, email: user.email });
+
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        },
+      });
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      console.error('Error details:', error.message, error.stack);
+      res.status(500).json({ message: error.message || 'Registration failed' });
     }
   });
 
-  app.patch('/api/auth/user/license', isAuthenticated, async (req: any, res) => {
+  // Login user
+  app.post('/api/auth/login', async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const { email, password } = req.body;
+
+      // Validate input
+      if (!email || !password) {
+        return res.status(400).json({ message: 'Email and password are required' });
+      }
+
+      // Get user by email
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        return res.status(401).json({ message: 'Invalid email or password' });
+      }
+
+      // Compare password
+      const isValidPassword = await comparePassword(password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: 'Invalid email or password' });
+      }
+
+      // Generate JWT token
+      const token = generateToken({ userId: user.id, email: user.email });
+
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          licenseVerified: user.licenseVerified,
+          isAdmin: user.isAdmin,
+        },
+      });
+    } catch (error: any) {
+      console.error('Login error:', error);
+      console.error('Error details:', error.message, error.stack);
+      res.status(500).json({ message: error.message || 'Login failed' });
+    }
+  });
+
+  // Get current user
+  app.get('/api/auth/user', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      // Don't send password to client
+      const { password, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      console.error('Error fetching user:', error);
+      res.status(500).json({ message: 'Failed to fetch user' });
+    }
+  });
+
+  // Update user license
+  app.patch('/api/auth/user/license', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
       const { licenseNumber, licenseState, licenseDocumentUrl } = req.body;
       
       // Validate required fields
@@ -88,8 +201,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ==================== Admin Routes ====================
-  
-  app.get('/api/admin/pending-licenses', isAuthenticated, isAdmin, async (req: any, res) => {
+
+  app.get('/api/admin/pending-licenses', authenticateToken, isAdmin, async (req: AuthRequest, res) => {
     try {
       const pendingUsers = await storage.getPendingLicenseUsers();
       res.json(pendingUsers);
@@ -98,7 +211,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/admin/approve-license/:userId', isAuthenticated, isAdmin, async (req: any, res) => {
+  app.post('/api/admin/approve-license/:userId', authenticateToken, isAdmin, async (req: AuthRequest, res) => {
     try {
       const { userId } = req.params;
       const approvedUser = await storage.approveLicense(userId);
@@ -160,10 +273,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create job
-  app.post("/api/jobs", isAuthenticated, async (req: any, res) => {
+  app.post("/api/jobs", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const validatedData = insertJobSchema.parse(req.body);
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       
       // Calculate platform fee (20%)
       const fee = parseFloat(validatedData.fee);
@@ -209,9 +322,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Claim job
-  app.post("/api/jobs/:id/claim", isAuthenticated, async (req: any, res) => {
+  app.post("/api/jobs/:id/claim", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const job = await storage.claimJob(req.params.id, userId);
       
       if (!job) {
@@ -234,9 +347,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // GPS Check-in
-  app.post("/api/jobs/:id/check-in", isAuthenticated, async (req: any, res) => {
+  app.post("/api/jobs/:id/check-in", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const { latitude, longitude } = req.body;
       const job = await storage.getJob(req.params.id);
 
@@ -300,9 +413,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // GPS Check-out
-  app.post("/api/jobs/:id/check-out", isAuthenticated, async (req: any, res) => {
+  app.post("/api/jobs/:id/check-out", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const { latitude, longitude } = req.body;
       const job = await storage.getJob(req.params.id);
 
@@ -373,9 +486,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Complete job and release payment
-  app.post("/api/jobs/:id/complete", isAuthenticated, async (req: any, res) => {
+  app.post("/api/jobs/:id/complete", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const job = await storage.getJob(req.params.id);
 
       if (!job) {
@@ -451,9 +564,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get my posted jobs
-  app.get("/api/my-jobs/posted", isAuthenticated, async (req: any, res) => {
+  app.get("/api/my-jobs/posted", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const jobs = await storage.getMyPostedJobs(userId);
       res.json(jobs);
     } catch (error: any) {
@@ -462,9 +575,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get my claimed jobs
-  app.get("/api/my-jobs/claimed", isAuthenticated, async (req: any, res) => {
+  app.get("/api/my-jobs/claimed", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const jobs = await storage.getMyClaimedJobs(userId);
       res.json(jobs);
     } catch (error: any) {
@@ -475,7 +588,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==================== Message Routes ====================
   
   // Get messages for a job
-  app.get("/api/jobs/:jobId/messages", isAuthenticated, async (req: any, res) => {
+  app.get("/api/jobs/:jobId/messages", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const messages = await storage.getJobMessages(req.params.jobId);
       
@@ -494,7 +607,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Send message
-  app.post("/api/jobs/:jobId/messages", isAuthenticated, async (req: any, res) => {
+  app.post("/api/jobs/:jobId/messages", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const validatedData = insertMessageSchema.parse(req.body);
       const message = await storage.createMessage(validatedData);
@@ -524,7 +637,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==================== Review Routes ====================
   
   // Submit review
-  app.post("/api/jobs/:jobId/review", isAuthenticated, async (req: any, res) => {
+  app.post("/api/jobs/:jobId/review", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const validatedData = insertReviewSchema.parse(req.body);
       const review = await storage.createReview(validatedData);
@@ -536,9 +649,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== Notification Routes ====================
   
-  app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
+  app.get("/api/notifications", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const notifications = await storage.getUserNotifications(userId);
       res.json(notifications);
     } catch (error: any) {
@@ -546,7 +659,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/notifications/:id/mark-read", isAuthenticated, async (req: any, res) => {
+  app.post("/api/notifications/:id/mark-read", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const { id } = req.params;
       await storage.markNotificationRead(id);
@@ -558,9 +671,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== Transaction Routes ====================
   
-  app.get("/api/transactions", isAuthenticated, async (req: any, res) => {
+  app.get("/api/transactions", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const transactions = await storage.getUserTransactions(userId);
       res.json(transactions);
     } catch (error: any) {
@@ -570,7 +683,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== Payment Routes ====================
   
-  app.post("/api/create-payment-intent", isAuthenticated, async (req, res) => {
+  app.post("/api/create-payment-intent", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const { amount } = req.body;
       const paymentIntent = await stripe.paymentIntents.create({
@@ -587,9 +700,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==================== Bank Account & Withdrawal Routes ====================
   
   // Create Financial Connections Session for bank linking
-  app.post("/api/create-financial-connections-session", isAuthenticated, async (req: any, res) => {
+  app.post("/api/create-financial-connections-session", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const user = await storage.getUser(userId);
       
       if (!user) {
@@ -629,9 +742,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Link bank account after Financial Connections Session
-  app.post("/api/link-bank-account", isAuthenticated, async (req: any, res) => {
+  app.post("/api/link-bank-account", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const { accountId } = req.body; // Financial Connections Account ID
       
       const user = await storage.getUser(userId);
@@ -661,9 +774,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create instant payout/withdrawal
-  app.post("/api/create-payout", isAuthenticated, async (req: any, res) => {
+  app.post("/api/create-payout", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user!.userId;
       const { amount } = req.body;
       
       const user = await storage.getUser(userId);
@@ -695,7 +808,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // For MVP: Create a transaction record (actual payout would require Stripe Connect)
       // In production, you would use stripe.payouts.create() with a Connect account
       await storage.createTransaction({
-        userId,
+        payerId: userId,
         type: 'payout',
         amount: requestedAmount.toFixed(2),
         status: 'completed',

@@ -24,10 +24,11 @@ import {
 import { db } from "./db";
 import { eq, and, or, desc, isNotNull, sql } from "drizzle-orm";
 
-// Interface for storage operations - includes Replit Auth requirements
+// Interface for storage operations
 export interface IStorage {
-  // User operations (IMPORTANT: mandatory for Replit Auth)
+  // User operations
   getUser(id: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
   getPendingLicenseUsers(): Promise<User[]>;
   approveLicense(userId: string): Promise<User | undefined>;
@@ -65,21 +66,26 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  // User operations (IMPORTANT: mandatory for Replit Auth)
+  // User operations
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
     return user;
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
     // Remove isAdmin from userData to prevent privilege escalation
     const { isAdmin: _, ...safeUserData } = userData as any;
-    
+
     const [user] = await db
       .insert(users)
       .values(safeUserData)
       .onConflictDoUpdate({
-        target: users.id,
+        target: users.email,
         set: {
           ...safeUserData,
           updatedAt: new Date(),
@@ -110,7 +116,10 @@ export class DatabaseStorage implements IStorage {
 
   // Job operations
   async createJob(jobData: InsertJob): Promise<Job> {
-    const [job] = await db.insert(jobs).values(jobData).returning();
+    const [job] = await db.insert(jobs).values({
+      ...jobData,
+      scheduledDate: new Date(jobData.scheduledDate),
+    }).returning();
     return job;
   }
 
@@ -242,12 +251,12 @@ export class DatabaseStorage implements IStorage {
     return await db
       .select()
       .from(transactions)
-      .where(or(eq(transactions.fromUserId, userId), eq(transactions.toUserId, userId)))
+      .where(or(eq(transactions.payerId, userId), eq(transactions.payeeId, userId)))
       .orderBy(desc(transactions.createdAt));
   }
 
   // Check-in operations
-  async createCheckIn(checkInData: InsertCheckIn): Promise<CheckIn> {
+  async createCheckIn(checkInData: InsertCheckIn & { verified?: boolean }): Promise<CheckIn> {
     const [checkIn] = await db.insert(checkIns).values(checkInData).returning();
     return checkIn;
   }

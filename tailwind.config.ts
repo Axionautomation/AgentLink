@@ -81,11 +81,12 @@ export default {
           busy: "rgb(239 68 68)",
           offline: "rgb(156 163 175)",
         },
+        success: "hsl(142 76% 36%)",
+        alert: "hsl(25 95% 53%)",
       },
       fontFamily: {
-        sans: ["var(--font-sans)"],
-        serif: ["var(--font-serif)"],
-        mono: ["var(--font-mono)"],
+        sans: ["Inter", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],
+        mono: ["JetBrains Mono", "Consolas", "Monaco", "Courier New", "monospace"],
       },
       keyframes: {
         "accordion-down": {

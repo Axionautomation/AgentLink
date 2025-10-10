@@ -26,10 +26,11 @@ export const sessions = pgTable(
   (table) => [index("IDX_session_expire").on(table.expire)],
 );
 
-// User storage table - mandatory for Replit Auth, extended for AgentLink
+// User storage table - extended for AgentLink with custom auth
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  email: varchar("email").unique(),
+  email: varchar("email").unique().notNull(),
+  password: varchar("password").notNull(), // Hashed password
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
@@ -78,7 +79,12 @@ export const jobs = pgTable("jobs", {
   claimerId: varchar("claimer_id").references(() => users.id),
   
   // Property details
-  propertyAddress: text("property_address").notNull(),
+  propertyAddress: text("property_address").notNull(), // Full formatted address for display
+  addressLine1: varchar("address_line_1"),
+  addressLine2: varchar("address_line_2"),
+  city: varchar("city"),
+  state: varchar("state"),
+  zipCode: varchar("zip_code"),
   propertyLat: decimal("property_lat", { precision: 10, scale: 7 }),
   propertyLng: decimal("property_lng", { precision: 10, scale: 7 }),
   propertyType: varchar("property_type").notNull(), // 'showing' | 'open_house'
@@ -225,21 +231,22 @@ export type Notification = typeof notifications.$inferSelect;
 
 export const transactions = pgTable("transactions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  jobId: varchar("job_id").notNull().references(() => jobs.id),
-  payerId: varchar("payer_id").notNull().references(() => users.id), // Job poster
+  jobId: varchar("job_id").references(() => jobs.id),
+  payerId: varchar("payer_id").references(() => users.id), // Job poster
   payeeId: varchar("payee_id").references(() => users.id), // Job claimer
-  
+
   // Transaction details
-  type: varchar("type").notNull(), // 'escrow_hold' | 'escrow_release' | 'platform_fee' | 'refund'
+  type: varchar("type").notNull(), // 'escrow_hold' | 'escrow_release' | 'platform_fee' | 'refund' | 'payout'
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   platformFee: decimal("platform_fee", { precision: 10, scale: 2 }),
   netAmount: decimal("net_amount", { precision: 10, scale: 2 }),
-  
+  description: text("description"),
+
   // Stripe details
   stripePaymentIntentId: varchar("stripe_payment_intent_id"),
   stripeTransferId: varchar("stripe_transfer_id"),
   status: varchar("status").notNull(), // 'pending' | 'held' | 'completed' | 'failed' | 'refunded'
-  
+
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
