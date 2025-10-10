@@ -1,5 +1,6 @@
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import pkg from 'pg';
+const { Pool } = pkg;
 import * as schema from "@shared/schema";
 
 if (!process.env.DATABASE_URL) {
@@ -8,6 +9,9 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-// Use Neon's HTTP driver which is compatible with Edge Runtime
-const sql = neon(process.env.DATABASE_URL);
-export const db = drizzle(sql, { schema });
+// Use standard PostgreSQL driver for local development
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+export const db = drizzle(pool, { schema });
