@@ -273,75 +273,98 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     }
   });
 
-  // Create job
+  // Create job (no payment yet - payment happens when job is claimed)
   app.post("/api/jobs", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const validatedData = insertJobSchema.parse(req.body);
-      const userId = req.user!.userId;
-      
+
       // Calculate platform fee (20%)
       const fee = parseFloat(validatedData.fee);
       const platformFee = fee * 0.20;
       const payoutAmount = fee - platformFee;
-      
-      // Create Stripe PaymentIntent for escrow
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(fee * 100), // Convert to cents
-        currency: "usd",
-        automatic_payment_methods: { enabled: true },
-        capture_method: 'manual', // Escrow - we'll capture later
-        metadata: {
-          platformFee: platformFee.toFixed(2),
-          payoutAmount: payoutAmount.toFixed(2),
-        }
-      });
 
-      const job = await storage.createJob({
-        ...validatedData,
+      // Create job without payment
+      const createdJob = await storage.createJob(validatedData);
+
+      // Update with calculated fees
+      const job = await storage.updateJob(createdJob.id, {
         platformFee: platformFee.toFixed(2),
         payoutAmount: payoutAmount.toFixed(2),
-        paymentIntentId: paymentIntent.id,
-        escrowHeld: true,
       });
 
-      // Record the escrow hold transaction
-      await storage.createTransaction({
-        jobId: job.id,
-        payerId: userId,
-        type: 'escrow_hold',
-        amount: fee.toFixed(2),
-        platformFee: platformFee.toFixed(2),
-        netAmount: payoutAmount.toFixed(2),
-        stripePaymentIntentId: paymentIntent.id,
-        status: 'held',
-      });
-
-      res.json({ ...job, clientSecret: paymentIntent.client_secret });
+      res.json(job);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
   });
 
-  // Claim job
+  // Claim job - creates payment intent for poster to pay
   app.post("/api/jobs/:id/claim", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const userId = req.user!.userId;
       const job = await storage.claimJob(req.params.id, userId);
-      
+
       if (!job) {
         return res.status(400).json({ message: "Job already claimed or not available" });
       }
+
+      // Get poster info for Stripe customer
+      const poster = await storage.getUser(job.posterId);
+      if (!poster) {
+        return res.status(404).json({ message: "Job poster not found" });
+      }
+
+      // Create or get Stripe customer for poster
+      let customerId = poster.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: poster.email,
+          name: `${poster.firstName} ${poster.lastName}`,
+        });
+        customerId = customer.id;
+        await storage.upsertUser({
+          ...poster,
+          stripeCustomerId: customerId,
+        });
+      }
+
+      // Create Stripe PaymentIntent for escrow with manual capture
+      const fee = parseFloat(job.fee);
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(fee * 100), // Convert to cents
+        currency: "usd",
+        customer: customerId,
+        automatic_payment_methods: { enabled: true },
+        capture_method: 'manual', // Hold funds in escrow until job complete
+        metadata: {
+          jobId: job.id,
+          posterId: job.posterId,
+          claimerId: job.claimerId || '',
+          platformFee: job.platformFee || '0',
+          payoutAmount: job.payoutAmount || '0',
+        }
+      });
+
+      // Update job with payment intent
+      await storage.updateJob(job.id, {
+        paymentIntentId: paymentIntent.id,
+      });
 
       // Create notification for job poster
       await storage.createNotification({
         userId: job.posterId,
         type: 'job_claimed',
-        title: 'Job Claimed',
-        message: `Your job at ${job.propertyAddress} has been claimed`,
+        title: 'Job Claimed - Payment Required',
+        message: `Your job at ${job.propertyAddress} has been claimed. Please complete payment to confirm.`,
         jobId: job.id,
       });
 
-      res.json(job);
+      // Return job with client secret for payment
+      res.json({
+        ...job,
+        paymentIntentId: paymentIntent.id,
+        clientSecret: paymentIntent.client_secret
+      });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -670,7 +693,96 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
   });
 
   // ==================== Payment Routes ====================
-  
+
+  // Get payment intent client secret for a job
+  app.get("/api/jobs/:jobId/payment-intent", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
+      const job = await storage.getJob(req.params.jobId);
+
+      if (!job) {
+        return res.status(404).json({ message: "Job not found" });
+      }
+
+      // Only poster can access payment intent
+      if (job.posterId !== userId) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+
+      if (!job.paymentIntentId) {
+        return res.status(400).json({ message: "No payment intent found for this job" });
+      }
+
+      // Retrieve payment intent from Stripe
+      const paymentIntent = await stripe.paymentIntents.retrieve(job.paymentIntentId);
+
+      res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Confirm payment successful - mark escrow as held
+  app.post("/api/jobs/:jobId/confirm-payment", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
+      const job = await storage.getJob(req.params.jobId);
+
+      if (!job) {
+        return res.status(404).json({ message: "Job not found" });
+      }
+
+      // Only poster can confirm payment
+      if (job.posterId !== userId) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+
+      if (!job.paymentIntentId) {
+        return res.status(400).json({ message: "No payment intent found" });
+      }
+
+      // Verify payment was successful with Stripe
+      const paymentIntent = await stripe.paymentIntents.retrieve(job.paymentIntentId);
+
+      if (paymentIntent.status !== 'requires_capture' && paymentIntent.status !== 'succeeded') {
+        return res.status(400).json({ message: "Payment not confirmed by Stripe" });
+      }
+
+      // Update job - mark escrow as held
+      const updatedJob = await storage.updateJob(req.params.jobId, {
+        escrowHeld: true,
+      });
+
+      // Record transaction
+      await storage.createTransaction({
+        jobId: job.id,
+        payerId: job.posterId,
+        payeeId: job.claimerId || undefined,
+        type: 'escrow_hold',
+        amount: job.fee,
+        platformFee: job.platformFee || '0',
+        netAmount: job.payoutAmount || job.fee,
+        stripePaymentIntentId: job.paymentIntentId,
+        status: 'held',
+      });
+
+      // Notify claimer that payment is held
+      if (job.claimerId) {
+        await storage.createNotification({
+          userId: job.claimerId,
+          type: 'job_confirmed',
+          title: 'Job Confirmed',
+          message: `Payment received for job at ${job.propertyAddress}. You can now proceed with the job.`,
+          jobId: job.id,
+        });
+      }
+
+      res.json(updatedJob);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.post("/api/create-payment-intent", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const { amount } = req.body;

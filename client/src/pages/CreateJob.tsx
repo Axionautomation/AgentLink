@@ -115,11 +115,11 @@ export default function CreateJob() {
     },
     onSuccess: (data: any) => {
       toast({
-        title: "Job Created!",
-        description: "Complete payment to post your job to the marketplace.",
+        title: "Job Posted!",
+        description: "Your job is now live on the marketplace. Payment will be required when someone claims it.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
-      setLocation(`/checkout/${data.id}`);
+      setLocation(`/jobs/${data.id}`);
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {

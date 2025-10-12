@@ -45,15 +45,39 @@ function CheckoutForm({ jobId, clientSecret }: { jobId: string; clientSecret: st
       });
       setIsProcessing(false);
     } else {
-      setPaymentSuccess(true);
-      toast({
-        title: "Payment Successful!",
-        description: "Your job has been posted to the marketplace.",
-      });
-      
-      setTimeout(() => {
-        setLocation(`/jobs/${jobId}`);
-      }, 1500);
+      // Payment confirmed with Stripe - now confirm with backend
+      try {
+        const token = localStorage.getItem('authToken');
+        const response = await fetch(`/api/jobs/${jobId}/confirm-payment`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to confirm payment');
+        }
+
+        setPaymentSuccess(true);
+        toast({
+          title: "Payment Successful!",
+          description: "Your payment is held in escrow. The agent has been notified.",
+        });
+
+        setTimeout(() => {
+          setLocation(`/jobs/${jobId}`);
+        }, 1500);
+      } catch (err) {
+        toast({
+          title: "Error",
+          description: "Payment processed but confirmation failed. Please contact support.",
+          variant: "destructive",
+        });
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -115,22 +139,10 @@ export default function Checkout() {
     enabled: !!jobId,
   });
 
-  const { data: paymentIntent, isLoading: paymentLoading } = useQuery<{ clientSecret: string }>({
-    queryKey: ["/api/create-payment-intent", jobId],
-    queryFn: async () => {
-      const res = await fetch(`/api/create-payment-intent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jobId,
-          amount: job?.fee ? parseFloat(job.fee) * 100 : 0,
-        }),
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Failed to create payment intent");
-      return res.json();
-    },
-    enabled: !!jobId && !!job?.fee,
+  // Fetch payment intent client secret
+  const { data: paymentData, isLoading: paymentLoading } = useQuery<{ clientSecret: string }>({
+    queryKey: [`/api/jobs/${jobId}/payment-intent`],
+    enabled: !!jobId && !!job?.paymentIntentId,
   });
 
   useEffect(() => {
@@ -149,16 +161,16 @@ export default function Checkout() {
     );
   }
 
-  if (!job || !paymentIntent?.clientSecret) {
+  if (!job || !paymentData?.clientSecret) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Card className="p-8 max-w-md text-center">
           <h2 className="text-xl font-semibold text-card-foreground mb-2">Payment Not Available</h2>
           <p className="text-muted-foreground mb-4">
-            Unable to load payment information. Please try again.
+            Unable to load payment information. The job may not be claimed yet.
           </p>
-          <Link href="/">
-            <Button className="rounded-lg">Return to Dashboard</Button>
+          <Link href={`/jobs/${jobId}`}>
+            <Button className="rounded-lg">Back to Job</Button>
           </Link>
         </Card>
       </div>
@@ -166,7 +178,7 @@ export default function Checkout() {
   }
 
   const options = {
-    clientSecret: paymentIntent.clientSecret,
+    clientSecret: paymentData.clientSecret,
     appearance: {
       theme: 'stripe' as const,
       variables: {
@@ -209,7 +221,7 @@ export default function Checkout() {
               </div>
 
               <Elements stripe={stripePromise} options={options}>
-                <CheckoutForm jobId={jobId} clientSecret={paymentIntent.clientSecret} />
+                <CheckoutForm jobId={jobId} clientSecret={paymentData.clientSecret} />
               </Elements>
             </Card>
           </div>
@@ -218,7 +230,7 @@ export default function Checkout() {
           <div className="md:col-span-1">
             <Card className="p-6">
               <h3 className="text-lg font-semibold text-card-foreground mb-4">Order Summary</h3>
-              
+
               <div className="space-y-3 mb-6 pb-6 border-b border-border">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Property Type</span>

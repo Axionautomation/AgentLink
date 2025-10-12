@@ -66,10 +66,12 @@ export default function JobDetail() {
     onSuccess: () => {
       toast({
         title: "Job Claimed!",
-        description: "The job has been assigned to you. Payment is now in escrow.",
+        description: "The job poster will be notified to complete payment.",
       });
       queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      // Redirect to job detail to show updated status
+      setLocation(`/jobs/${id}`);
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {
@@ -224,6 +226,7 @@ export default function JobDetail() {
   const isJobPoster = user?.id === job.posterId;
   const isJobClaimer = user?.id === job.claimerId;
   const canClaim = job.status === 'open' && !isJobPoster;
+  const needsPayment = isJobPoster && job.status === 'claimed' && !job.escrowHeld && job.paymentIntentId;
   const canCheckInNow = isJobClaimer && !job.claimerCheckedIn && canCheckIn;
   const canCheckOutNow = isJobClaimer && job.claimerCheckedIn && !job.claimerCheckedOut && canCheckIn;
   const canComplete = isJobPoster && job.claimerCheckedOut && !job.paymentReleased;
@@ -444,6 +447,31 @@ export default function JobDetail() {
           </Card>
         )}
 
+        {/* Payment Required Alert for Poster */}
+        {needsPayment && (
+          <Card className="p-6 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800">
+            <div className="flex items-start gap-4">
+              <div className="h-12 w-12 rounded-full bg-yellow-100 dark:bg-yellow-900/40 flex items-center justify-center flex-shrink-0">
+                <DollarSign className="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-yellow-900 dark:text-yellow-100 mb-2">
+                  Payment Required
+                </h3>
+                <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-4">
+                  This job has been claimed. Please complete payment to confirm the booking and notify the agent.
+                </p>
+                <Link href={`/checkout/${job.id}`}>
+                  <Button className="rounded-lg bg-yellow-600 hover:bg-yellow-700 text-white">
+                    <DollarSign className="h-4 w-4 mr-2" />
+                    Pay ${parseFloat(job.fee).toFixed(2)} Now
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </Card>
+        )}
+
         {/* Actions */}
         <div className="flex gap-4">
           {canClaim && (
@@ -457,9 +485,9 @@ export default function JobDetail() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Claim this job?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    By claiming this job, you commit to attending the scheduled showing/open house. 
-                    Payment of ${parseFloat(job.fee).toFixed(2)} will be held in escrow and released 
-                    after completion and confirmation.
+                    By claiming this job, you commit to attending the scheduled showing/open house.
+                    The job poster will be notified and required to pay ${parseFloat(job.fee).toFixed(2)}.
+                    Payment will be held in escrow and released to you after completion.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

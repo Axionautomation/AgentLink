@@ -13,6 +13,7 @@ import Dashboard from "@/pages/Dashboard";
 import CreateJob from "@/pages/CreateJob";
 import JobDetail from "@/pages/JobDetail";
 import Messages from "@/pages/Messages";
+import MessagesList from "@/pages/MessagesList";
 import Review from "@/pages/Review";
 import Profile from "@/pages/Profile";
 import MyJobs from "@/pages/MyJobs";
@@ -50,6 +51,7 @@ function Router() {
           <Route path="/payment-success" component={PaymentSuccess} />
           <Route path="/jobs/:id" component={JobDetail} />
           <Route path="/jobs/:jobId/review" component={Review} />
+          <Route path="/messages" component={MessagesList} />
           <Route path="/messages/:jobId" component={Messages} />
           <Route path="/profile" component={Profile} />
           <Route path="/my-jobs" component={MyJobs} />
