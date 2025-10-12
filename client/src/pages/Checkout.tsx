@@ -58,7 +58,8 @@ function CheckoutForm({ jobId, clientSecret }: { jobId: string; clientSecret: st
         });
 
         if (!response.ok) {
-          throw new Error('Failed to confirm payment');
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to confirm payment');
         }
 
         setPaymentSuccess(true);
@@ -70,10 +71,11 @@ function CheckoutForm({ jobId, clientSecret }: { jobId: string; clientSecret: st
         setTimeout(() => {
           setLocation(`/jobs/${jobId}`);
         }, 1500);
-      } catch (err) {
+      } catch (err: any) {
+        console.error('Payment confirmation error:', err);
         toast({
           title: "Error",
-          description: "Payment processed but confirmation failed. Please contact support.",
+          description: err.message || "Payment processed but confirmation failed. Please contact support.",
           variant: "destructive",
         });
         setIsProcessing(false);

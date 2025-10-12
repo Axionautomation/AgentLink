@@ -744,8 +744,12 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
       // Verify payment was successful with Stripe
       const paymentIntent = await stripe.paymentIntents.retrieve(job.paymentIntentId);
 
-      if (paymentIntent.status !== 'requires_capture' && paymentIntent.status !== 'succeeded') {
-        return res.status(400).json({ message: "Payment not confirmed by Stripe" });
+      // Accept various valid payment states
+      const validStates = ['requires_capture', 'succeeded', 'processing'];
+      if (!validStates.includes(paymentIntent.status)) {
+        return res.status(400).json({
+          message: `Payment not ready. Status: ${paymentIntent.status}. Please try again.`
+        });
       }
 
       // Update job - mark escrow as held
