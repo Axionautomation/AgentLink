@@ -729,28 +729,40 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
       const job = await storage.getJob(req.params.jobId);
 
       if (!job) {
+        console.error('Payment confirmation failed: Job not found', req.params.jobId);
         return res.status(404).json({ message: "Job not found" });
       }
 
       // Only poster can confirm payment
       if (job.posterId !== userId) {
+        console.error('Payment confirmation failed: Unauthorized', { jobId: job.id, userId, posterId: job.posterId });
         return res.status(403).json({ message: "Not authorized" });
       }
 
       if (!job.paymentIntentId) {
+        console.error('Payment confirmation failed: No payment intent', { jobId: job.id });
         return res.status(400).json({ message: "No payment intent found" });
       }
 
       // Verify payment was successful with Stripe
+      console.log('Retrieving payment intent:', job.paymentIntentId);
       const paymentIntent = await stripe.paymentIntents.retrieve(job.paymentIntentId);
+      console.log('Payment intent status:', paymentIntent.status, 'Amount:', paymentIntent.amount);
 
       // Accept various valid payment states
       const validStates = ['requires_capture', 'succeeded', 'processing'];
       if (!validStates.includes(paymentIntent.status)) {
+        console.error('Payment confirmation failed: Invalid status', {
+          jobId: job.id,
+          status: paymentIntent.status,
+          validStates
+        });
         return res.status(400).json({
           message: `Payment not ready. Status: ${paymentIntent.status}. Please try again.`
         });
       }
+
+      console.log('Payment intent validated, updating job:', job.id);
 
       // Update job - mark escrow as held
       const updatedJob = await storage.updateJob(req.params.jobId, {
