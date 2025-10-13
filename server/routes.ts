@@ -302,71 +302,98 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
   app.post("/api/jobs/:id/claim", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const userId = req.user!.userId;
+      console.log('Claiming job:', req.params.id, 'by user:', userId);
+
       const job = await storage.claimJob(req.params.id, userId);
 
       if (!job) {
+        console.error('Job claim failed: Job not available');
         return res.status(400).json({ message: "Job already claimed or not available" });
       }
+
+      console.log('Job claimed successfully:', job.id);
 
       // Get poster info for Stripe customer
       const poster = await storage.getUser(job.posterId);
       if (!poster) {
+        console.error('Job claim failed: Poster not found', job.posterId);
         return res.status(404).json({ message: "Job poster not found" });
       }
+
+      console.log('Creating Stripe customer for poster:', poster.email);
 
       // Create or get Stripe customer for poster
       let customerId = poster.stripeCustomerId;
       if (!customerId) {
-        const customer = await stripe.customers.create({
-          email: poster.email,
-          name: `${poster.firstName} ${poster.lastName}`,
-        });
-        customerId = customer.id;
-        await storage.upsertUser({
-          ...poster,
-          stripeCustomerId: customerId,
-        });
+        try {
+          const customer = await stripe.customers.create({
+            email: poster.email,
+            name: `${poster.firstName} ${poster.lastName}`,
+          });
+          customerId = customer.id;
+          console.log('Created Stripe customer:', customerId);
+
+          await storage.upsertUser({
+            ...poster,
+            stripeCustomerId: customerId,
+          });
+        } catch (stripeError: any) {
+          console.error('Stripe customer creation failed:', stripeError.message);
+          throw new Error(`Failed to create Stripe customer: ${stripeError.message}`);
+        }
       }
 
       // Create Stripe PaymentIntent for escrow with manual capture
       const fee = parseFloat(job.fee);
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(fee * 100), // Convert to cents
-        currency: "usd",
-        customer: customerId,
-        automatic_payment_methods: { enabled: true },
-        capture_method: 'manual', // Hold funds in escrow until job complete
-        metadata: {
+      console.log('Creating PaymentIntent for amount:', fee, 'cents:', Math.round(fee * 100));
+
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: Math.round(fee * 100), // Convert to cents
+          currency: "usd",
+          customer: customerId,
+          automatic_payment_methods: { enabled: true },
+          capture_method: 'manual', // Hold funds in escrow until job complete
+          metadata: {
+            jobId: job.id,
+            posterId: job.posterId,
+            claimerId: job.claimerId || '',
+            platformFee: job.platformFee || '0',
+            payoutAmount: job.payoutAmount || '0',
+          }
+        });
+
+        console.log('PaymentIntent created:', paymentIntent.id, 'Status:', paymentIntent.status);
+
+        // Update job with payment intent
+        await storage.updateJob(job.id, {
+          paymentIntentId: paymentIntent.id,
+        });
+
+        // Create notification for job poster
+        await storage.createNotification({
+          userId: job.posterId,
+          type: 'job_claimed',
+          title: 'Job Claimed - Payment Required',
+          message: `Your job at ${job.propertyAddress} has been claimed. Please complete payment to confirm.`,
           jobId: job.id,
-          posterId: job.posterId,
-          claimerId: job.claimerId || '',
-          platformFee: job.platformFee || '0',
-          payoutAmount: job.payoutAmount || '0',
-        }
-      });
+        });
 
-      // Update job with payment intent
-      await storage.updateJob(job.id, {
-        paymentIntentId: paymentIntent.id,
-      });
+        console.log('Job claim complete, returning response');
 
-      // Create notification for job poster
-      await storage.createNotification({
-        userId: job.posterId,
-        type: 'job_claimed',
-        title: 'Job Claimed - Payment Required',
-        message: `Your job at ${job.propertyAddress} has been claimed. Please complete payment to confirm.`,
-        jobId: job.id,
-      });
-
-      // Return job with client secret for payment
-      res.json({
-        ...job,
-        paymentIntentId: paymentIntent.id,
-        clientSecret: paymentIntent.client_secret
-      });
+        // Return job with client secret for payment
+        res.json({
+          ...job,
+          paymentIntentId: paymentIntent.id,
+          clientSecret: paymentIntent.client_secret
+        });
+      } catch (stripeError: any) {
+        console.error('Stripe PaymentIntent creation failed:', stripeError.message, stripeError);
+        throw new Error(`Failed to create payment intent: ${stripeError.message}`);
+      }
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      console.error('Job claim error:', error.message, error.stack);
+      res.status(500).json({ message: error.message || 'Failed to claim job' });
     }
   });
 
