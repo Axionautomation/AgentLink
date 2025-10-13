@@ -47,7 +47,7 @@ function CheckoutForm({ jobId, clientSecret }: { jobId: string; clientSecret: st
     } else {
       // Payment confirmed with Stripe - now confirm with backend
       try {
-        const token = localStorage.getItem('authToken');
+        const token = localStorage.getItem('agentlink_auth_token');
         const response = await fetch(`/api/jobs/${jobId}/confirm-payment`, {
           method: 'POST',
           headers: {
@@ -163,13 +163,29 @@ export default function Checkout() {
     );
   }
 
-  if (!job || !paymentData?.clientSecret) {
+  if (!job) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Card className="p-8 max-w-md text-center">
+          <h2 className="text-xl font-semibold text-card-foreground mb-2">Job Not Found</h2>
+          <p className="text-muted-foreground mb-4">
+            The job you're looking for doesn't exist.
+          </p>
+          <Link href="/">
+            <Button className="rounded-lg">Back to Dashboard</Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!paymentData?.clientSecret) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Card className="p-8 max-w-md text-center">
           <h2 className="text-xl font-semibold text-card-foreground mb-2">Payment Not Available</h2>
           <p className="text-muted-foreground mb-4">
-            Unable to load payment information. The job may not be claimed yet.
+            Unable to load payment information. The job may not be claimed yet or payment is already complete.
           </p>
           <Link href={`/jobs/${jobId}`}>
             <Button className="rounded-lg">Back to Job</Button>
