@@ -719,6 +719,35 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     }
   });
 
+  // ==================== Admin/Maintenance Routes ====================
+
+  // Clear Stripe customer IDs (use when switching between test/live modes)
+  app.post("/api/admin/clear-stripe-ids", authenticateToken, isAdmin, async (req: AuthRequest, res) => {
+    try {
+      // This is needed when switching between test and live Stripe keys
+      // because customer IDs from one mode don't exist in the other
+
+      // Import db directly
+      const { db } = await import("./db");
+      const { users } = await import("@shared/schema");
+
+      const result = await db.update(users)
+        .set({ stripeCustomerId: null })
+        .returning();
+
+      console.log(`Cleared Stripe customer IDs for ${result.length} users`);
+
+      res.json({
+        success: true,
+        message: `Cleared Stripe customer IDs for ${result.length} users. New test customers will be created on next job claim.`,
+        count: result.length
+      });
+    } catch (error: any) {
+      console.error('Failed to clear Stripe IDs:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ==================== Payment Routes ====================
 
   // Get payment intent client secret for a job
