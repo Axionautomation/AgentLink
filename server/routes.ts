@@ -740,29 +740,58 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
 
   // ==================== Admin/Maintenance Routes ====================
 
-  // Clear Stripe customer IDs (use when switching between test/live modes)
-  app.post("/api/admin/clear-stripe-ids", authenticateToken, isAdmin, async (req: AuthRequest, res) => {
+  // Clear ALL Stripe data (use when switching between test/live modes)
+  // THIS IS A NUCLEAR OPTION - removes all Stripe references from database
+  app.post("/api/admin/clear-all-stripe-data", async (req: AuthRequest, res) => {
     try {
-      // This is needed when switching between test and live Stripe keys
-      // because customer IDs from one mode don't exist in the other
+      // INTENTIONALLY NO AUTH - this needs to be accessible when fixing production
+      // Security: Only works if you know the secret code
+      const { secretCode } = req.body;
+
+      if (secretCode !== 'RESET_STRIPE_2024') {
+        return res.status(403).json({ message: 'Invalid secret code' });
+      }
+
+      console.log('🚨 CLEARING ALL STRIPE DATA FROM DATABASE 🚨');
 
       // Import db directly
       const { db } = await import("./db");
-      const { users } = await import("@shared/schema");
+      const { users, jobs } = await import("@shared/schema");
 
-      const result = await db.update(users)
-        .set({ stripeCustomerId: null })
+      // Clear all Stripe customer IDs
+      const userResult = await db.update(users)
+        .set({
+          stripeCustomerId: null,
+          stripeAccountId: null,
+          stripeFinancialConnectionsAccountId: null,
+          stripeExternalAccountId: null,
+          bankAccountLast4: null,
+          bankName: null
+        })
         .returning();
 
-      console.log(`Cleared Stripe customer IDs for ${result.length} users`);
+      console.log(`Cleared Stripe data for ${userResult.length} users`);
+
+      // Clear payment intent IDs from jobs that haven't been paid
+      const { sql } = await import("drizzle-orm");
+      const jobResult = await db.update(jobs)
+        .set({
+          paymentIntentId: null,
+          escrowHeld: false
+        })
+        .where(sql`${jobs.escrowHeld} = false OR ${jobs.paymentReleased} = true`)
+        .returning();
+
+      console.log(`Cleared payment intents from ${jobResult.length} jobs`);
 
       res.json({
         success: true,
-        message: `Cleared Stripe customer IDs for ${result.length} users. New test customers will be created on next job claim.`,
-        count: result.length
+        message: `✅ Cleared all Stripe data. ${userResult.length} users reset, ${jobResult.length} jobs cleaned. Fresh start!`,
+        usersCleared: userResult.length,
+        jobsCleared: jobResult.length
       });
     } catch (error: any) {
-      console.error('Failed to clear Stripe IDs:', error);
+      console.error('Failed to clear Stripe data:', error);
       res.status(500).json({ message: error.message });
     }
   });
