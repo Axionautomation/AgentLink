@@ -343,31 +343,50 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
         }
       }
 
-      // Create Stripe PaymentIntent for escrow with manual capture
+      // Create Stripe Checkout Session for payment
       const fee = parseFloat(job.fee);
-      console.log('Creating PaymentIntent for amount:', fee, 'cents:', Math.round(fee * 100));
+      console.log('Creating Checkout Session for amount:', fee, 'cents:', Math.round(fee * 100));
 
       try {
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount: Math.round(fee * 100), // Convert to cents
-          currency: "usd",
+        const checkoutSession = await stripe.checkout.sessions.create({
           customer: customerId,
-          automatic_payment_methods: { enabled: true },
-          capture_method: 'manual', // Hold funds in escrow until job complete
+          mode: 'payment',
+          payment_method_types: ['card'],
+          line_items: [
+            {
+              price_data: {
+                currency: 'usd',
+                unit_amount: Math.round(fee * 100),
+                product_data: {
+                  name: `AgentLink Job - ${job.propertyType.replace('_', ' ')}`,
+                  description: `${job.propertyAddress} - ${new Date(job.scheduledDate).toLocaleDateString()}`,
+                },
+              },
+              quantity: 1,
+            },
+          ],
+          payment_intent_data: {
+            capture_method: 'manual', // Hold in escrow
+            metadata: {
+              jobId: job.id,
+              posterId: job.posterId,
+              claimerId: job.claimerId || '',
+              platformFee: job.platformFee || '0',
+              payoutAmount: job.payoutAmount || '0',
+            },
+          },
+          success_url: `${process.env.CLIENT_URL || 'https://agentlink.onrender.com'}/payment-success?jobId=${job.id}`,
+          cancel_url: `${process.env.CLIENT_URL || 'https://agentlink.onrender.com'}/jobs/${job.id}`,
           metadata: {
             jobId: job.id,
-            posterId: job.posterId,
-            claimerId: job.claimerId || '',
-            platformFee: job.platformFee || '0',
-            payoutAmount: job.payoutAmount || '0',
-          }
+          },
         });
 
-        console.log('PaymentIntent created:', paymentIntent.id, 'Status:', paymentIntent.status);
+        console.log('Checkout Session created:', checkoutSession.id);
 
-        // Update job with payment intent
+        // Update job with checkout session ID
         await storage.updateJob(job.id, {
-          paymentIntentId: paymentIntent.id,
+          paymentIntentId: checkoutSession.id, // Store session ID for now
         });
 
         // Create notification for job poster
@@ -379,17 +398,17 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
           jobId: job.id,
         });
 
-        console.log('Job claim complete, returning response');
+        console.log('Job claim complete, returning checkout URL');
 
-        // Return job with client secret for payment
+        // Return job with checkout URL
         res.json({
           ...job,
-          paymentIntentId: paymentIntent.id,
-          clientSecret: paymentIntent.client_secret
+          checkoutSessionId: checkoutSession.id,
+          checkoutUrl: checkoutSession.url
         });
       } catch (stripeError: any) {
-        console.error('Stripe PaymentIntent creation failed:', stripeError.message, stripeError);
-        throw new Error(`Failed to create payment intent: ${stripeError.message}`);
+        console.error('Stripe Checkout Session creation failed:', stripeError.message, stripeError);
+        throw new Error(`Failed to create checkout session: ${stripeError.message}`);
       }
     } catch (error: any) {
       console.error('Job claim error:', error.message, error.stack);
@@ -750,7 +769,40 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
 
   // ==================== Payment Routes ====================
 
-  // Get payment intent client secret for a job
+  // Get Stripe Checkout URL for a job
+  app.get("/api/jobs/:jobId/checkout-url", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
+      const job = await storage.getJob(req.params.jobId);
+
+      if (!job) {
+        return res.status(404).json({ message: "Job not found" });
+      }
+
+      // Only poster can get checkout URL
+      if (job.posterId !== userId) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+
+      if (!job.paymentIntentId) {
+        return res.status(400).json({ message: "No checkout session found for this job" });
+      }
+
+      // Retrieve checkout session from Stripe
+      const session = await stripe.checkout.sessions.retrieve(job.paymentIntentId);
+
+      if (!session.url) {
+        return res.status(400).json({ message: "Checkout session expired or already completed" });
+      }
+
+      res.json({ checkoutUrl: session.url });
+    } catch (error: any) {
+      console.error('Failed to get checkout URL:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get payment intent client secret for a job (legacy - kept for backwards compatibility)
   app.get("/api/jobs/:jobId/payment-intent", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const userId = req.user!.userId;

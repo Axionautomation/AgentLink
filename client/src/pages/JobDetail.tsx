@@ -61,7 +61,7 @@ export default function JobDetail() {
   const claimJobMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", `/api/jobs/${id}/claim`, {});
-      return response;
+      return response.json();
     },
     onSuccess: () => {
       toast({
@@ -70,7 +70,6 @@ export default function JobDetail() {
       });
       queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
-      // Redirect to job detail to show updated status
       setLocation(`/jobs/${id}`);
     },
     onError: (error: Error) => {
@@ -461,12 +460,27 @@ export default function JobDetail() {
                 <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-4">
                   This job has been claimed. Please complete payment to confirm the booking and notify the agent.
                 </p>
-                <Link href={`/checkout/${job.id}`}>
-                  <Button className="rounded-lg bg-yellow-600 hover:bg-yellow-700 text-white">
-                    <DollarSign className="h-4 w-4 mr-2" />
-                    Pay ${parseFloat(job.fee).toFixed(2)} Now
-                  </Button>
-                </Link>
+                <Button
+                  className="rounded-lg bg-yellow-600 hover:bg-yellow-700 text-white"
+                  onClick={async () => {
+                    try {
+                      const response = await apiRequest("GET", `/api/jobs/${job.id}/checkout-url`, undefined);
+                      const data = await response.json();
+                      if (data.checkoutUrl) {
+                        window.location.href = data.checkoutUrl;
+                      }
+                    } catch (error: any) {
+                      toast({
+                        title: "Error",
+                        description: error.message || "Failed to start checkout",
+                        variant: "destructive",
+                      });
+                    }
+                  }}
+                >
+                  <DollarSign className="h-4 w-4 mr-2" />
+                  Pay ${parseFloat(job.fee).toFixed(2)} Now
+                </Button>
               </div>
             </div>
           </Card>
