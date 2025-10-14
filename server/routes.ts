@@ -776,29 +776,105 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
       const job = await storage.getJob(req.params.jobId);
 
       if (!job) {
+        console.error('Checkout URL request: Job not found', req.params.jobId);
         return res.status(404).json({ message: "Job not found" });
       }
 
       // Only poster can get checkout URL
       if (job.posterId !== userId) {
+        console.error('Checkout URL request: Unauthorized', { userId, posterId: job.posterId });
         return res.status(403).json({ message: "Not authorized" });
       }
 
-      if (!job.paymentIntentId) {
-        return res.status(400).json({ message: "No checkout session found for this job" });
+      console.log('Getting checkout URL for job:', job.id, 'sessionId:', job.paymentIntentId);
+
+      // If no session ID exists or it's an old PaymentIntent ID, create a new checkout session
+      if (!job.paymentIntentId || !job.paymentIntentId.startsWith('cs_')) {
+        console.log('Creating new checkout session (old or missing session)');
+
+        // Get poster info for Stripe customer
+        const poster = await storage.getUser(job.posterId);
+        if (!poster) {
+          return res.status(404).json({ message: "Job poster not found" });
+        }
+
+        // Create or get Stripe customer
+        let customerId = poster.stripeCustomerId;
+        if (!customerId) {
+          const customer = await stripe.customers.create({
+            email: poster.email,
+            name: `${poster.firstName} ${poster.lastName}`,
+          });
+          customerId = customer.id;
+          await storage.upsertUser({
+            ...poster,
+            stripeCustomerId: customerId,
+          });
+        }
+
+        // Create new checkout session
+        const fee = parseFloat(job.fee);
+        const checkoutSession = await stripe.checkout.sessions.create({
+          customer: customerId,
+          mode: 'payment',
+          payment_method_types: ['card'],
+          line_items: [
+            {
+              price_data: {
+                currency: 'usd',
+                unit_amount: Math.round(fee * 100),
+                product_data: {
+                  name: `AgentLink Job - ${job.propertyType.replace('_', ' ')}`,
+                  description: `${job.propertyAddress} - ${new Date(job.scheduledDate).toLocaleDateString()}`,
+                },
+              },
+              quantity: 1,
+            },
+          ],
+          payment_intent_data: {
+            capture_method: 'manual',
+            metadata: {
+              jobId: job.id,
+              posterId: job.posterId,
+              claimerId: job.claimerId || '',
+              platformFee: job.platformFee || '0',
+              payoutAmount: job.payoutAmount || '0',
+            },
+          },
+          success_url: `${process.env.CLIENT_URL || 'https://agentlink.onrender.com'}/payment-success?jobId=${job.id}`,
+          cancel_url: `${process.env.CLIENT_URL || 'https://agentlink.onrender.com'}/jobs/${job.id}`,
+          metadata: {
+            jobId: job.id,
+          },
+        });
+
+        // Update job with new session ID
+        await storage.updateJob(job.id, {
+          paymentIntentId: checkoutSession.id,
+        });
+
+        console.log('New checkout session created:', checkoutSession.id);
+        return res.json({ checkoutUrl: checkoutSession.url });
       }
 
-      // Retrieve checkout session from Stripe
-      const session = await stripe.checkout.sessions.retrieve(job.paymentIntentId);
+      // Try to retrieve existing checkout session
+      try {
+        const session = await stripe.checkout.sessions.retrieve(job.paymentIntentId);
 
-      if (!session.url) {
-        return res.status(400).json({ message: "Checkout session expired or already completed" });
+        if (!session.url) {
+          console.log('Checkout session has no URL (expired or completed)');
+          return res.status(400).json({ message: "Checkout session expired. Please try again." });
+        }
+
+        console.log('Retrieved existing checkout session:', session.id);
+        res.json({ checkoutUrl: session.url });
+      } catch (stripeError: any) {
+        console.error('Failed to retrieve checkout session:', stripeError.message);
+        return res.status(500).json({ message: "Failed to retrieve checkout session. Please try claiming the job again." });
       }
-
-      res.json({ checkoutUrl: session.url });
     } catch (error: any) {
-      console.error('Failed to get checkout URL:', error);
-      res.status(500).json({ message: error.message });
+      console.error('Checkout URL error:', error.message, error.stack);
+      res.status(500).json({ message: error.message || 'Failed to get checkout URL' });
     }
   });
 
