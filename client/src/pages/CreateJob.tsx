@@ -12,7 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, MapPin } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { ArrowLeft, MapPin, Info } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { insertJobSchema, type InsertJob } from "@shared/schema";
 import { z } from "zod";
@@ -27,6 +28,7 @@ const formSchema = insertJobSchema.extend({
   city: z.string().min(1, "City is required"),
   state: z.string().min(1, "State is required"),
   zipCode: z.string().min(1, "ZIP code is required"),
+  mlsListingUrl: z.string().url("Please enter a valid URL").min(1, "MLS listing link is required"),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -52,6 +54,7 @@ export default function CreateJob() {
       duration: "60",
       description: "",
       specialInstructions: "",
+      mlsListingUrl: "",
       fee: "",
       status: "open",
     },
@@ -276,6 +279,41 @@ export default function CreateJob() {
                   />
                 </div>
               </div>
+
+              <FormField
+                control={form.control}
+                name="mlsListingUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-2">
+                      Link to MLS Listing *
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            <p className="text-sm">
+                              Copy the URL from your MLS system (e.g., Realtor.com, Zillow, or your local MLS portal).
+                              This helps the covering agent prepare for the showing by reviewing property details.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type="url"
+                        placeholder="https://www.realtor.com/realestateandhomes-detail/..."
+                        className="rounded-lg"
+                        data-testid="input-mls-url"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <FormField

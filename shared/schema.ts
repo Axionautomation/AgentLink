@@ -95,6 +95,7 @@ export const jobs = pgTable("jobs", {
   duration: integer("duration").notNull(), // in minutes
   description: text("description"),
   specialInstructions: text("special_instructions"),
+  mlsListingUrl: varchar("mls_listing_url"), // Link to MLS listing
   
   // Payment
   fee: decimal("fee", { precision: 10, scale: 2 }).notNull(),

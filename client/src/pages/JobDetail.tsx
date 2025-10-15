@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { ArrowLeft, MapPin, Clock, DollarSign, Home, Building2, CheckCircle2, MapPinned, MessageSquare } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { ArrowLeft, MapPin, Clock, DollarSign, Home, Building2, CheckCircle2, MapPinned, MessageSquare, ExternalLink, Info } from "lucide-react";
 import { Link, useLocation, useParams } from "wouter";
 import type { Job, User } from "@shared/schema";
 
@@ -292,12 +293,21 @@ export default function JobDetail() {
 
             <div className="flex items-center gap-3">
               <DollarSign className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-sm text-muted-foreground">Payment</p>
-                <p className="font-medium font-mono text-card-foreground">${parseFloat(job.fee).toFixed(2)}</p>
-                <p className="text-xs text-muted-foreground">
-                  Payout: ${job.payoutAmount ? parseFloat(job.payoutAmount).toFixed(2) : '0.00'} (after 20% fee)
-                </p>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-muted-foreground">Payout</p>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="text-sm">Platform has a 20% fee on all jobs</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+                <p className="font-medium font-mono text-card-foreground">${job.payoutAmount ? parseFloat(job.payoutAmount).toFixed(2) : '0.00'}</p>
               </div>
             </div>
           </div>
@@ -306,6 +316,21 @@ export default function JobDetail() {
             <div className="pt-4 border-t border-border">
               <p className="text-sm text-muted-foreground mb-2">Description</p>
               <p className="text-card-foreground">{job.description}</p>
+            </div>
+          )}
+
+          {job.mlsListingUrl && (
+            <div className="pt-4 border-t border-border">
+              <p className="text-sm text-muted-foreground mb-2">MLS Listing</p>
+              <a
+                href={job.mlsListingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-primary hover:underline"
+              >
+                View Property Listing
+                <ExternalLink className="h-4 w-4" />
+              </a>
             </div>
           )}
 

@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { MapPin, DollarSign, MessageSquare, Shield, CheckCircle2, Clock } from "lucide-react";
 
 export default function Landing() {
@@ -16,7 +15,6 @@ export default function Landing() {
             <span className="text-xl font-bold text-foreground">AgentLink</span>
           </div>
           <div className="flex items-center gap-3">
-            <ThemeToggle />
             <Button
               onClick={() => window.location.href = '/login'}
               data-testid="button-login"
@@ -33,11 +31,11 @@ export default function Landing() {
         {/* Background Image */}
         <div className="absolute inset-0 z-0">
           <img
-            src="https://images.unsplash.com/photo-1560518883-ce09059eeffa?q=80&w=2073&auto=format&fit=crop"
+            src="https://cdn.pixabay.com/photo/2021/10/11/13/01/apartment-building-6700505_1280.jpg"
             alt="Modern real estate building"
             className="w-full h-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-r from-[hsl(222,47%,11%)]/95 via-[hsl(222,47%,11%)]/85 to-[hsl(222,47%,11%)]/75" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[hsl(222,47%,11%)]/85 via-[hsl(222,47%,11%)]/70 to-[hsl(222,47%,11%)]/60" />
         </div>
 
         <div className="relative z-10 max-w-7xl mx-auto px-4 py-20 md:py-32">
@@ -241,7 +239,7 @@ export default function Landing() {
               <span className="text-lg font-bold text-foreground">AgentLink</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              © 2024 AgentLink. On-demand coverage for real estate professionals.
+              © 2025 AgentLink. On-demand coverage for real estate professionals.
             </p>
           </div>
         </div>
