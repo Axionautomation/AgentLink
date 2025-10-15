@@ -258,8 +258,20 @@ export default function JobDetail() {
             {job.status.replace('_', ' ').toUpperCase()}
           </Badge>
           
-          <div className="text-2xl font-bold font-mono text-primary">
-            ${parseFloat(job.fee).toFixed(2)}
+          <div className="flex items-center gap-2">
+            <div className="text-2xl font-bold font-mono text-primary">
+              ${job.payoutAmount ? parseFloat(job.payoutAmount).toFixed(2) : '0.00'}
+            </div>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-sm">Platform has a 20% fee on all jobs</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
 
