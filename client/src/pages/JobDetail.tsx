@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArrowLeft, MapPin, Clock, DollarSign, Home, Building2, CheckCircle2, MapPinned, MessageSquare, ExternalLink, Info } from "lucide-react";
+import { ArrowLeft, MapPin, Clock, DollarSign, Home, Building2, CheckCircle2, MapPinned, MessageSquare, ExternalLink, Info, Phone, User as UserIcon } from "lucide-react";
 import { Link, useLocation, useParams } from "wouter";
 import type { Job, User } from "@shared/schema";
 
@@ -354,6 +354,50 @@ export default function JobDetail() {
           )}
         </Card>
 
+        {/* Poster Info - Always visible */}
+        {job.poster && (
+          <Card className="p-6">
+            <h3 className="text-sm font-semibold text-card-foreground mb-4">
+              Posted By
+            </h3>
+            <div className="flex items-start gap-4">
+              {job.poster.profileImageUrl ? (
+                <img
+                  src={job.poster.profileImageUrl}
+                  alt={job.poster.firstName || 'Agent'}
+                  className="h-12 w-12 rounded-full object-cover"
+                />
+              ) : (
+                <div className="h-12 w-12 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-semibold">
+                  {job.poster.firstName?.[0] || 'A'}
+                </div>
+              )}
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <UserIcon className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-medium text-card-foreground">
+                    {job.poster.firstName} {job.poster.lastName}
+                  </p>
+                </div>
+                {job.poster.phone && (
+                  <div className="flex items-center gap-2">
+                    <Phone className="h-4 w-4 text-muted-foreground" />
+                    <a href={`tel:${job.poster.phone}`} className="text-sm text-primary hover:underline">
+                      {job.poster.phone}
+                    </a>
+                  </div>
+                )}
+                {job.poster.brokerage && (
+                  <p className="text-sm text-muted-foreground mt-1">{job.poster.brokerage}</p>
+                )}
+                {job.poster.rating && parseFloat(job.poster.rating) > 0 && (
+                  <p className="text-sm text-muted-foreground mt-1">⭐ {parseFloat(job.poster.rating).toFixed(1)} rating</p>
+                )}
+              </div>
+            </div>
+          </Card>
+        )}
+
         {/* Agent Info */}
         {job.claimer && (
           <Card className="p-6">
@@ -373,9 +417,20 @@ export default function JobDetail() {
                 </div>
               )}
               <div className="flex-1">
-                <p className="font-medium text-card-foreground">
-                  {(isJobClaimer ? job.poster : job.claimer)?.firstName} {(isJobClaimer ? job.poster : job.claimer)?.lastName}
-                </p>
+                <div className="flex items-center gap-2 mb-2">
+                  <UserIcon className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-medium text-card-foreground">
+                    {(isJobClaimer ? job.poster : job.claimer)?.firstName} {(isJobClaimer ? job.poster : job.claimer)?.lastName}
+                  </p>
+                </div>
+                {(isJobClaimer ? job.poster : job.claimer)?.phone && (
+                  <div className="flex items-center gap-2 mb-1">
+                    <Phone className="h-4 w-4 text-muted-foreground" />
+                    <a href={`tel:${(isJobClaimer ? job.poster : job.claimer)?.phone}`} className="text-sm text-primary hover:underline">
+                      {(isJobClaimer ? job.poster : job.claimer)?.phone}
+                    </a>
+                  </div>
+                )}
                 {(isJobClaimer ? job.poster : job.claimer)?.brokerage && (
                   <p className="text-sm text-muted-foreground">{(isJobClaimer ? job.poster : job.claimer)?.brokerage}</p>
                 )}

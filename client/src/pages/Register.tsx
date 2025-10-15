@@ -13,6 +13,7 @@ export default function Register() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
@@ -48,10 +49,15 @@ export default function Register() {
       return;
     }
 
+    if (!phone) {
+      setError('Phone number is required');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      await register(email, password, firstName, lastName);
+      await register(email, password, firstName, lastName, phone);
       setLocation('/');
     } catch (err: any) {
       setError(err.message || 'Registration failed. Please try again.');
@@ -119,6 +125,19 @@ export default function Register() {
                 placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                required
+                disabled={loading}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phone">Phone Number</Label>
+              <Input
+                id="phone"
+                type="tel"
+                placeholder="(555) 123-4567"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
                 required
                 disabled={loading}
               />

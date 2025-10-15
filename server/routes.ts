@@ -49,11 +49,19 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
   // Register new user
   app.post('/api/auth/register', async (req, res) => {
     try {
-      const { email, password, firstName, lastName } = req.body;
+      const { email, password, firstName, lastName, phone } = req.body;
 
       // Validate input
       if (!email || !password) {
         return res.status(400).json({ message: 'Email and password are required' });
+      }
+
+      if (!firstName || !lastName) {
+        return res.status(400).json({ message: 'First name and last name are required' });
+      }
+
+      if (!phone) {
+        return res.status(400).json({ message: 'Phone number is required' });
       }
 
       if (!isValidEmail(email)) {
@@ -80,6 +88,7 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
         password: hashedPassword,
         firstName: firstName || '',
         lastName: lastName || '',
+        phone: phone || '',
       });
 
       // Generate JWT token
