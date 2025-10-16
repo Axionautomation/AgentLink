@@ -403,6 +403,23 @@ export default function JobDetail() {
             </div>
           )}
 
+          {isJobClaimer && job.individualTips && (
+            <div className="pt-4 border-t border-border">
+              <div className="flex items-center gap-2 mb-3">
+                <p className="text-sm font-semibold text-card-foreground">🔒 Individual Tips (Private)</p>
+                <div className="flex-1 border-t border-border"></div>
+              </div>
+              <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 rounded-lg p-4 mb-3">
+                <p className="text-xs text-amber-800 dark:text-amber-200 font-medium mb-2">
+                  🔐 <strong>Secure Information:</strong> This information is private and only visible to you as the assigned agent.
+                </p>
+              </div>
+              <div className="bg-muted/50 rounded-lg p-4">
+                <pre className="text-sm text-card-foreground whitespace-pre-wrap font-mono">{job.individualTips}</pre>
+              </div>
+            </div>
+          )}
+
           {job.attachmentUrls && Array.isArray(job.attachmentUrls) && job.attachmentUrls.length > 0 && (
             <div className="pt-4 border-t border-border">
               <p className="text-sm text-muted-foreground mb-3">Attachments</p>

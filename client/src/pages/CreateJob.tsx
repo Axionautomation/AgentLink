@@ -67,6 +67,7 @@ export default function CreateJob() {
       duration: "60",
       description: "",
       specialInstructions: "",
+      individualTips: "",
       mlsListingUrl: "",
       fee: "",
       status: "open",
@@ -550,7 +551,7 @@ export default function CreateJob() {
                     <FormControl>
                       <Textarea
                         {...field}
-                        placeholder="Lockbox code, parking instructions, etc..."
+                        placeholder="General notes about the property or showing..."
                         className="rounded-lg resize-none"
                         rows={3}
                         data-testid="textarea-instructions"
@@ -559,6 +560,48 @@ export default function CreateJob() {
                     <p className="text-xs text-muted-foreground">
                       Only visible to the agent who claims this job
                     </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="individualTips"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-2">
+                      Individual Tips (Private & Secure)
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            <p className="text-sm font-semibold mb-1">🔒 Privacy Protected</p>
+                            <p className="text-sm">
+                              This information is ONLY visible to the agent who claims your job.
+                              Perfect for lockbox codes, gate access codes, alarm codes, or specific entry instructions.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </FormLabel>
+                    <FormControl>
+                      <Textarea
+                        {...field}
+                        placeholder="Lockbox code: 1234&#10;Gate code: #5678&#10;Alarm: Disarmed&#10;Enter through side door..."
+                        className="rounded-lg resize-none font-mono"
+                        rows={4}
+                        data-testid="textarea-individual-tips"
+                      />
+                    </FormControl>
+                    <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 rounded-lg p-3">
+                      <p className="text-xs text-amber-800 dark:text-amber-200 font-medium">
+                        🔒 <strong>Security Notice:</strong> This field is encrypted and only shown to the agent who accepts your job.
+                        Include sensitive access codes, parking details, or private instructions here.
+                      </p>
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}

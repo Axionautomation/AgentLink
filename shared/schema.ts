@@ -98,6 +98,7 @@ export const jobs = pgTable("jobs", {
   specialInstructions: text("special_instructions"),
   mlsListingUrl: varchar("mls_listing_url"), // Link to MLS listing
   attachmentUrls: jsonb("attachment_urls"), // Array of file URLs [{name: string, url: string, type: string}]
+  individualTips: text("individual_tips"), // Private tips/codes only visible to claimer (lockbox codes, parking, etc.)
   
   // Payment
   fee: decimal("fee", { precision: 10, scale: 2 }).notNull(),
