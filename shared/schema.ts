@@ -87,8 +87,9 @@ export const jobs = pgTable("jobs", {
   zipCode: varchar("zip_code"),
   propertyLat: decimal("property_lat", { precision: 10, scale: 7 }),
   propertyLng: decimal("property_lng", { precision: 10, scale: 7 }),
-  propertyType: varchar("property_type").notNull(), // 'showing' | 'open_house'
-  
+  propertyType: varchar("property_type").notNull(), // 'showing' | 'open_house' | 'other'
+  propertyTypeOther: varchar("property_type_other"), // Custom type when 'other' is selected
+
   // Job details
   scheduledDate: timestamp("scheduled_date").notNull(),
   scheduledTime: varchar("scheduled_time").notNull(), // e.g., "2:00 PM - 4:00 PM"

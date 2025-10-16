@@ -252,15 +252,19 @@ export default function Dashboard() {
                   <div className="flex items-start gap-2">
                     {job.propertyType === 'showing' ? (
                       <Home className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-                    ) : (
+                    ) : job.propertyType === 'open_house' ? (
                       <Building2 className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                    ) : (
+                      <Home className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-card-foreground truncate">
                         {job.propertyAddress}
                       </p>
                       <p className="text-sm text-muted-foreground capitalize">
-                        {job.propertyType.replace('_', ' ')}
+                        {job.propertyType === 'other' && job.propertyTypeOther
+                          ? job.propertyTypeOther
+                          : job.propertyType.replace('_', ' ')}
                       </p>
                     </div>
                   </div>

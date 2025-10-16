@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -29,6 +29,15 @@ const formSchema = insertJobSchema.extend({
   state: z.string().min(1, "State is required"),
   zipCode: z.string().min(1, "ZIP code is required"),
   mlsListingUrl: z.string().url("Please enter a valid URL").min(1, "MLS listing link is required"),
+  propertyTypeOther: z.string().optional(),
+}).refine(data => {
+  if (data.propertyType === 'other' && !data.propertyTypeOther) {
+    return false;
+  }
+  return true;
+}, {
+  message: "Please specify the job type",
+  path: ["propertyTypeOther"],
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -37,6 +46,7 @@ export default function CreateJob() {
   const { user, isLoading: authLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const [showOtherType, setShowOtherType] = useState(false);
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -49,6 +59,7 @@ export default function CreateJob() {
       state: "",
       zipCode: "",
       propertyType: "showing",
+      propertyTypeOther: "",
       scheduledDate: "",
       scheduledTime: "",
       duration: "60",
@@ -322,7 +333,16 @@ export default function CreateJob() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Job Type *</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select
+                        onValueChange={(value) => {
+                          field.onChange(value);
+                          setShowOtherType(value === 'other');
+                          if (value !== 'other') {
+                            form.setValue('propertyTypeOther', '');
+                          }
+                        }}
+                        defaultValue={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger className="rounded-lg" data-testid="select-job-type">
                             <SelectValue />
@@ -331,6 +351,7 @@ export default function CreateJob() {
                         <SelectContent>
                           <SelectItem value="showing">Showing</SelectItem>
                           <SelectItem value="open_house">Open House</SelectItem>
+                          <SelectItem value="other">Other</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -338,6 +359,29 @@ export default function CreateJob() {
                   )}
                 />
 
+                {showOtherType && (
+                  <FormField
+                    control={form.control}
+                    name="propertyTypeOther"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Specify Job Type *</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="e.g., Final Walkthrough, Inspection"
+                            className="rounded-lg"
+                            data-testid="input-property-type-other"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <FormField
                   control={form.control}
                   name="fee"

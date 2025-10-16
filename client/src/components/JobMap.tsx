@@ -139,13 +139,17 @@ export function JobMap({ jobs, userLocation }: JobMapProps) {
                   <div className="flex items-start gap-2 mb-2">
                     {job.propertyType === 'showing' ? (
                       <Home className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-                    ) : (
+                    ) : job.propertyType === 'open_house' ? (
                       <Building2 className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+                    ) : (
+                      <Home className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
                     )}
                     <div className="flex-1">
                       <p className="font-medium text-sm">{job.propertyAddress}</p>
                       <p className="text-xs text-muted-foreground capitalize">
-                        {job.propertyType.replace('_', ' ')}
+                        {job.propertyType === 'other' && job.propertyTypeOther
+                          ? job.propertyTypeOther
+                          : job.propertyType.replace('_', ' ')}
                       </p>
                     </div>
                   </div>

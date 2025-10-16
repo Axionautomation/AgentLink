@@ -280,13 +280,17 @@ export default function JobDetail() {
           <div className="flex items-start gap-3">
             {job.propertyType === 'showing' ? (
               <Home className="h-6 w-6 text-primary mt-0.5" />
-            ) : (
+            ) : job.propertyType === 'open_house' ? (
               <Building2 className="h-6 w-6 text-primary mt-0.5" />
+            ) : (
+              <Home className="h-6 w-6 text-primary mt-0.5" />
             )}
             <div className="flex-1">
               <h2 className="text-xl font-semibold text-card-foreground">{job.propertyAddress}</h2>
               <p className="text-sm text-muted-foreground capitalize mt-1">
-                {job.propertyType.replace('_', ' ')}
+                {job.propertyType === 'other' && job.propertyTypeOther
+                  ? job.propertyTypeOther
+                  : job.propertyType.replace('_', ' ')}
               </p>
             </div>
           </div>
