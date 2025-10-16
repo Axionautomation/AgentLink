@@ -486,6 +486,92 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     }
   });
 
+  // Cancel/Delete job (poster only, must be open or claimed status)
+  app.post("/api/jobs/:id/cancel", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
+      const jobId = req.params.id;
+
+      const job = await storage.getJob(jobId);
+      if (!job) {
+        return res.status(404).json({ message: "Job not found" });
+      }
+
+      // Only poster can cancel
+      if (job.posterId !== userId) {
+        return res.status(403).json({ message: "Only the job poster can cancel this job" });
+      }
+
+      // Can only cancel open or claimed jobs (not in progress or completed)
+      if (job.status !== 'open' && job.status !== 'claimed') {
+        return res.status(400).json({ message: "Cannot cancel job in current status" });
+      }
+
+      // If job was claimed and has payment intent, cancel/refund it
+      if (job.status === 'claimed' && job.paymentIntentId) {
+        try {
+          await stripe.paymentIntents.cancel(job.paymentIntentId);
+        } catch (stripeError: any) {
+          console.error('Failed to cancel payment intent:', stripeError);
+          // Continue anyway - we still want to cancel the job
+        }
+      }
+
+      // Update job status to cancelled
+      await storage.updateJob(jobId, { status: 'cancelled' });
+
+      res.json({ message: "Job cancelled successfully" });
+    } catch (error: any) {
+      console.error('Cancel job error:', error);
+      res.status(500).json({ message: error.message || 'Failed to cancel job' });
+    }
+  });
+
+  // Unclaim job (claimer only, must be claimed status)
+  app.post("/api/jobs/:id/unclaim", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
+      const jobId = req.params.id;
+
+      const job = await storage.getJob(jobId);
+      if (!job) {
+        return res.status(404).json({ message: "Job not found" });
+      }
+
+      // Only claimer can unclaim
+      if (job.claimerId !== userId) {
+        return res.status(403).json({ message: "Only the claimer can unclaim this job" });
+      }
+
+      // Can only unclaim if status is 'claimed' (not yet in progress)
+      if (job.status !== 'claimed') {
+        return res.status(400).json({ message: "Cannot unclaim job in current status" });
+      }
+
+      // Cancel payment intent if exists
+      if (job.paymentIntentId) {
+        try {
+          await stripe.paymentIntents.cancel(job.paymentIntentId);
+        } catch (stripeError: any) {
+          console.error('Failed to cancel payment intent:', stripeError);
+        }
+      }
+
+      // Reset job to open status
+      await storage.updateJob(jobId, {
+        status: 'open',
+        claimerId: null,
+        paymentIntentId: null,
+        escrowHeld: false
+      });
+
+      res.json({ message: "Job unclaimed successfully" });
+    } catch (error: any) {
+      console.error('Unclaim job error:', error);
+      res.status(500).json({ message: error.message || 'Failed to unclaim job' });
+    }
+  });
+
   // GPS Check-in
   app.post("/api/jobs/:id/check-in", authenticateToken, async (req: AuthRequest, res) => {
     try {

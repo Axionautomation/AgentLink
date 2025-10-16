@@ -202,6 +202,50 @@ export default function JobDetail() {
     },
   });
 
+  const cancelJobMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", `/api/jobs/${id}/cancel`, {});
+      return response;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Job Cancelled",
+        description: "The job has been cancelled successfully.",
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}`] });
+      setLocation('/');
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Cancellation Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const unclaimJobMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", `/api/jobs/${id}/unclaim`, {});
+      return response;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Job Unclaimed",
+        description: "You have successfully opted out of this job.",
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}`] });
+      setLocation('/');
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Unclaim Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   if (authLoading || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -230,6 +274,8 @@ export default function JobDetail() {
   const canCheckInNow = isJobClaimer && !job.claimerCheckedIn && canCheckIn;
   const canCheckOutNow = isJobClaimer && job.claimerCheckedIn && !job.claimerCheckedOut && canCheckIn;
   const canComplete = isJobPoster && job.claimerCheckedOut && !job.paymentReleased;
+  const canCancel = isJobPoster && (job.status === 'open' || job.status === 'claimed');
+  const canUnclaim = isJobClaimer && job.status === 'claimed';
 
   return (
     <div className="min-h-screen bg-background">
@@ -389,8 +435,8 @@ export default function JobDetail() {
           )}
         </Card>
 
-        {/* Poster Info - Always visible */}
-        {job.poster && (
+        {/* Poster Info - Visible after job is claimed or to poster */}
+        {job.poster && (job.status !== 'open' || isJobPoster) && (
           <Card className="p-6">
             <h3 className="text-sm font-semibold text-card-foreground mb-4">
               Posted By
@@ -414,7 +460,8 @@ export default function JobDetail() {
                     {job.poster.firstName} {job.poster.lastName}
                   </p>
                 </div>
-                {job.poster.phone && (
+                {/* Only show phone after job is claimed */}
+                {job.poster.phone && job.status !== 'open' && (
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 text-muted-foreground" />
                     <a href={`tel:${job.poster.phone}`} className="text-sm text-primary hover:underline">
@@ -614,7 +661,8 @@ export default function JobDetail() {
         )}
 
         {/* Actions */}
-        <div className="flex gap-4">
+        <div className="flex flex-col gap-4">
+          <div className="flex gap-4">
           {canClaim && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -673,6 +721,69 @@ export default function JobDetail() {
               </AlertDialogContent>
             </AlertDialog>
           )}
+          </div>
+
+          {/* Cancel/Unclaim buttons */}
+          <div className="flex gap-4">
+            {canCancel && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" className="flex-1 rounded-lg" data-testid="button-cancel">
+                    Cancel Job
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Cancel this job?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently cancel the job posting.
+                      {job.status === 'claimed' && ' Any pending payments will be cancelled.'}
+                      This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="rounded-lg">Keep Job</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => cancelJobMutation.mutate()}
+                      disabled={cancelJobMutation.isPending}
+                      className="rounded-lg bg-destructive hover:bg-destructive/90"
+                    >
+                      {cancelJobMutation.isPending ? "Cancelling..." : "Cancel Job"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+
+            {canUnclaim && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" className="flex-1 rounded-lg" data-testid="button-unclaim">
+                    Opt Out
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Opt out of this job?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will remove your claim on this job and make it available for other agents.
+                      Any pending payments will be cancelled. You can claim it again if it's still available.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="rounded-lg">Stay Claimed</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => unclaimJobMutation.mutate()}
+                      disabled={unclaimJobMutation.isPending}
+                      className="rounded-lg"
+                    >
+                      {unclaimJobMutation.isPending ? "Processing..." : "Opt Out"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
         </div>
       </div>
     </div>
