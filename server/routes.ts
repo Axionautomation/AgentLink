@@ -419,6 +419,7 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
   // Create job (no payment yet - payment happens when job is claimed)
   app.post("/api/jobs", authenticateToken, async (req: AuthRequest, res) => {
     try {
+      console.log('Received job creation request:', JSON.stringify(req.body, null, 2));
       const validatedData = insertJobSchema.parse(req.body);
 
       // Calculate platform fee (20%)
@@ -437,7 +438,16 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
 
       res.json(job);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      console.error('Job creation error:', error);
+      console.error('Error details:', error.message, error.stack);
+      if (error.issues) {
+        // Zod validation error
+        console.error('Validation issues:', JSON.stringify(error.issues, null, 2));
+      }
+      res.status(500).json({
+        message: error.message,
+        issues: error.issues || undefined
+      });
     }
   });
 
