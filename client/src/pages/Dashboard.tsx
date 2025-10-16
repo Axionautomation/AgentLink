@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MapPin, List, Clock, DollarSign, Home, Building2, Filter, Search, MapPinned } from "lucide-react";
+import { MapPin, List, Clock, DollarSign, Home, Building2, Filter, Search, MapPinned, Phone, User } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { JobMap } from "@/components/JobMap";
 import { NotificationBell } from "@/components/NotificationBell";
@@ -18,6 +18,13 @@ import { Link, useLocation } from "wouter";
 interface JobWithDistance extends Job {
   distance?: number;
   posterName?: string;
+  poster?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    phone?: string;
+    email: string;
+  };
 }
 
 export default function Dashboard() {
@@ -278,6 +285,27 @@ export default function Dashboard() {
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <MapPin className="h-4 w-4" />
                       <span>{job.distance.toFixed(1)} mi away</span>
+                    </div>
+                  )}
+
+                  {job.poster && (
+                    <div className="pt-2 border-t border-border space-y-1">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <User className="h-4 w-4" />
+                        <span className="font-medium">{job.poster.firstName} {job.poster.lastName}</span>
+                      </div>
+                      {job.poster.phone && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <Phone className="h-4 w-4 text-muted-foreground" />
+                          <a
+                            href={`tel:${job.poster.phone}`}
+                            className="text-primary hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {job.poster.phone}
+                          </a>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

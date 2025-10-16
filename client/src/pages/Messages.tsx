@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Send, MessageSquare } from "lucide-react";
+import { ArrowLeft, Send, MessageSquare, Phone } from "lucide-react";
 import { Link, useParams } from "wouter";
 import type { Message, Job, User } from "@shared/schema";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -325,10 +325,30 @@ export default function Messages() {
                 <p className="text-xs text-muted-foreground truncate max-w-[200px]">
                   {job.propertyAddress}
                 </p>
+                {otherUser?.phone && (
+                  <div className="flex items-center gap-1 mt-1">
+                    <Phone className="h-3 w-3 text-muted-foreground" />
+                    <a
+                      href={`tel:${otherUser.phone}`}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      {otherUser.phone}
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            {otherUser?.phone && (
+              <a href={`tel:${otherUser.phone}`}>
+                <Button variant="outline" size="icon" className="rounded-lg">
+                  <Phone className="h-4 w-4" />
+                </Button>
+              </a>
+            )}
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 

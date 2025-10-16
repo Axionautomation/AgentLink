@@ -6,10 +6,25 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Clock, DollarSign, Home, Building2, MapPin } from "lucide-react";
+import { ArrowLeft, Clock, DollarSign, Home, Building2, MapPin, Phone, User } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import type { Job } from "@shared/schema";
 import { ThemeToggle } from "@/components/ThemeToggle";
+
+interface JobWithUsers extends Job {
+  poster?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    phone?: string;
+  };
+  claimer?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    phone?: string;
+  };
+}
 
 export default function MyJobs() {
   const { user, isLoading: authLoading, isAuthenticated } = useAuth();
@@ -29,11 +44,11 @@ export default function MyJobs() {
     }
   }, [isAuthenticated, authLoading, toast]);
 
-  const { data: myPostedJobs = [], isLoading: loadingPosted } = useQuery<Job[]>({
+  const { data: myPostedJobs = [], isLoading: loadingPosted } = useQuery<JobWithUsers[]>({
     queryKey: ["/api/my-jobs/posted"],
   });
 
-  const { data: myClaimedJobs = [], isLoading: loadingClaimed } = useQuery<Job[]>({
+  const { data: myClaimedJobs = [], isLoading: loadingClaimed } = useQuery<JobWithUsers[]>({
     queryKey: ["/api/my-jobs/claimed"],
   });
 
@@ -53,7 +68,11 @@ export default function MyJobs() {
     );
   };
 
-  const JobCard = ({ job, type }: { job: Job; type: 'posted' | 'claimed' }) => (
+  const JobCard = ({ job, type }: { job: JobWithUsers; type: 'posted' | 'claimed' }) => {
+    // For posted jobs, show claimer; for claimed jobs, show poster
+    const otherUser = type === 'posted' ? job.claimer : job.poster;
+
+    return (
     <Card 
       className="p-4 space-y-3 hover-elevate transition-all duration-200 cursor-pointer"
       onClick={() => setLocation(`/jobs/${job.id}`)}
@@ -89,6 +108,30 @@ export default function MyJobs() {
         </div>
       </div>
 
+      {otherUser && (
+        <div className="pt-2 border-t border-border space-y-1">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <User className="h-4 w-4" />
+            <span className="font-medium">
+              {type === 'posted' ? 'Claimed by: ' : 'Posted by: '}
+              {otherUser.firstName} {otherUser.lastName}
+            </span>
+          </div>
+          {otherUser.phone && (
+            <div className="flex items-center gap-2 text-sm">
+              <Phone className="h-4 w-4 text-muted-foreground" />
+              <a
+                href={`tel:${otherUser.phone}`}
+                className="text-primary hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {otherUser.phone}
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+
       <Button 
         className="w-full rounded-lg" 
         variant="outline"
@@ -101,7 +144,8 @@ export default function MyJobs() {
         View Details
       </Button>
     </Card>
-  );
+    );
+  };
 
   if (authLoading) {
     return (

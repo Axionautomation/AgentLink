@@ -877,7 +877,19 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     try {
       const userId = req.user!.userId;
       const jobs = await storage.getMyPostedJobs(userId);
-      res.json(jobs);
+
+      // Fetch claimer info for each job
+      const jobsWithClaimer = await Promise.all(
+        jobs.map(async (job) => {
+          const claimer = job.claimerId ? await storage.getUser(job.claimerId) : null;
+          return {
+            ...job,
+            claimer,
+          };
+        })
+      );
+
+      res.json(jobsWithClaimer);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -888,7 +900,19 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     try {
       const userId = req.user!.userId;
       const jobs = await storage.getMyClaimedJobs(userId);
-      res.json(jobs);
+
+      // Fetch poster info for each job
+      const jobsWithPoster = await Promise.all(
+        jobs.map(async (job) => {
+          const poster = await storage.getUser(job.posterId);
+          return {
+            ...job,
+            poster,
+          };
+        })
+      );
+
+      res.json(jobsWithPoster);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
