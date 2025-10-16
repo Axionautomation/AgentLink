@@ -228,9 +228,6 @@ export default function Wallet() {
               <p className="text-muted-foreground mb-4">
                 Link your bank account to withdraw funds instantly with Stripe Financial Connections
               </p>
-              <p className="text-sm text-muted-foreground mb-6">
-                Note: For MVP, bank linking is simulated. In production, use Stripe Financial Connections.
-              </p>
             </div>
           ) : showWithdrawForm ? (
             <div className="space-y-4">
