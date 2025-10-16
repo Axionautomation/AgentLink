@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Star, Briefcase, MapPin, Mail, Phone, LogOut, Shield, Award, Upload } from "lucide-react";
 import { Link } from "wouter";
@@ -19,6 +20,79 @@ export default function Profile() {
   const [licenseNumber, setLicenseNumber] = useState("");
   const [licenseState, setLicenseState] = useState("");
   const [licenseDocumentUrl, setLicenseDocumentUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [age, setAge] = useState(user?.age?.toString() || "");
+  const [brokerage, setBrokerage] = useState(user?.brokerage || "");
+  const [bio, setBio] = useState(user?.bio || "");
+
+  const handleProfileImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('files', file);
+
+    try {
+      const token = localStorage.getItem('agentlink_auth_token');
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Upload failed');
+
+      const data = await response.json();
+      const imageUrl = data.files[0].url;
+
+      // Update user profile with new image
+      await apiRequest("PATCH", "/api/auth/user/profile", {
+        profileImageUrl: imageUrl
+      });
+
+      toast({
+        title: "Profile Picture Updated",
+        description: "Your profile picture has been uploaded successfully",
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+    } catch (error: any) {
+      toast({
+        title: "Upload Failed",
+        description: error.message || "Failed to upload profile picture",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const updateProfileMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("PATCH", "/api/auth/user/profile", {
+        age: age ? parseInt(age) : null,
+        brokerage,
+        bio,
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Profile Updated",
+        description: "Your profile has been updated successfully",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update profile",
+        variant: "destructive",
+      });
+    },
+  });
 
   const updateLicenseMutation = useMutation({
     mutationFn: async () => {
@@ -169,6 +243,112 @@ export default function Profile() {
           </div>
         </Card>
 
+        {/* Edit Profile */}
+        <Card className="p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-card-foreground">Edit Profile</h3>
+
+          <div className="space-y-4">
+            {/* Profile Picture Upload */}
+            <div className="space-y-2">
+              <Label>Profile Picture</Label>
+              <div className="flex items-center gap-4">
+                {user?.profileImageUrl ? (
+                  <img
+                    src={user.profileImageUrl}
+                    alt="Profile preview"
+                    className="h-20 w-20 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="h-20 w-20 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold text-2xl">
+                    {user?.firstName?.[0] || user?.email?.[0] || 'U'}
+                  </div>
+                )}
+                <div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleProfileImageUpload}
+                    disabled={uploading}
+                    className="hidden"
+                    id="profile-image-upload"
+                  />
+                  <Label htmlFor="profile-image-upload">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-lg cursor-pointer"
+                      disabled={uploading}
+                      onClick={() => document.getElementById('profile-image-upload')?.click()}
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      {uploading ? "Uploading..." : "Upload Picture"}
+                    </Button>
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    JPG, PNG or GIF (max 10MB)
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Age */}
+            <div className="space-y-2">
+              <Label htmlFor="age">Age</Label>
+              <Input
+                id="age"
+                type="number"
+                min="18"
+                max="120"
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                placeholder="Enter your age"
+                className="rounded-lg"
+              />
+              <p className="text-xs text-muted-foreground">
+                Helps verify you're a real person
+              </p>
+            </div>
+
+            {/* Brokerage */}
+            <div className="space-y-2">
+              <Label htmlFor="brokerage">Brokerage</Label>
+              <Input
+                id="brokerage"
+                type="text"
+                value={brokerage}
+                onChange={(e) => setBrokerage(e.target.value)}
+                placeholder="e.g., Keller Williams, RE/MAX"
+                className="rounded-lg"
+              />
+            </div>
+
+            {/* Bio */}
+            <div className="space-y-2">
+              <Label htmlFor="bio">Bio</Label>
+              <Textarea
+                id="bio"
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                placeholder="Tell us about yourself and your experience..."
+                className="rounded-lg min-h-[100px]"
+                maxLength={500}
+              />
+              <p className="text-xs text-muted-foreground text-right">
+                {bio.length}/500 characters
+              </p>
+            </div>
+
+            {/* Save Button */}
+            <Button
+              onClick={() => updateProfileMutation.mutate()}
+              disabled={updateProfileMutation.isPending}
+              className="w-full rounded-lg"
+            >
+              {updateProfileMutation.isPending ? "Saving..." : "Save Profile"}
+            </Button>
+          </div>
+        </Card>
+
         {/* License Info */}
         {user?.licenseNumber ? (
           <Card className="p-6 space-y-4">
@@ -234,16 +414,56 @@ export default function Profile() {
                     <SelectValue placeholder="Select state" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="AL">Alabama</SelectItem>
+                    <SelectItem value="AK">Alaska</SelectItem>
+                    <SelectItem value="AZ">Arizona</SelectItem>
+                    <SelectItem value="AR">Arkansas</SelectItem>
                     <SelectItem value="CA">California</SelectItem>
-                    <SelectItem value="TX">Texas</SelectItem>
+                    <SelectItem value="CO">Colorado</SelectItem>
+                    <SelectItem value="CT">Connecticut</SelectItem>
+                    <SelectItem value="DE">Delaware</SelectItem>
                     <SelectItem value="FL">Florida</SelectItem>
-                    <SelectItem value="NY">New York</SelectItem>
-                    <SelectItem value="IL">Illinois</SelectItem>
-                    <SelectItem value="PA">Pennsylvania</SelectItem>
-                    <SelectItem value="OH">Ohio</SelectItem>
                     <SelectItem value="GA">Georgia</SelectItem>
-                    <SelectItem value="NC">North Carolina</SelectItem>
+                    <SelectItem value="HI">Hawaii</SelectItem>
+                    <SelectItem value="ID">Idaho</SelectItem>
+                    <SelectItem value="IL">Illinois</SelectItem>
+                    <SelectItem value="IN">Indiana</SelectItem>
+                    <SelectItem value="IA">Iowa</SelectItem>
+                    <SelectItem value="KS">Kansas</SelectItem>
+                    <SelectItem value="KY">Kentucky</SelectItem>
+                    <SelectItem value="LA">Louisiana</SelectItem>
+                    <SelectItem value="ME">Maine</SelectItem>
+                    <SelectItem value="MD">Maryland</SelectItem>
+                    <SelectItem value="MA">Massachusetts</SelectItem>
                     <SelectItem value="MI">Michigan</SelectItem>
+                    <SelectItem value="MN">Minnesota</SelectItem>
+                    <SelectItem value="MS">Mississippi</SelectItem>
+                    <SelectItem value="MO">Missouri</SelectItem>
+                    <SelectItem value="MT">Montana</SelectItem>
+                    <SelectItem value="NE">Nebraska</SelectItem>
+                    <SelectItem value="NV">Nevada</SelectItem>
+                    <SelectItem value="NH">New Hampshire</SelectItem>
+                    <SelectItem value="NJ">New Jersey</SelectItem>
+                    <SelectItem value="NM">New Mexico</SelectItem>
+                    <SelectItem value="NY">New York</SelectItem>
+                    <SelectItem value="NC">North Carolina</SelectItem>
+                    <SelectItem value="ND">North Dakota</SelectItem>
+                    <SelectItem value="OH">Ohio</SelectItem>
+                    <SelectItem value="OK">Oklahoma</SelectItem>
+                    <SelectItem value="OR">Oregon</SelectItem>
+                    <SelectItem value="PA">Pennsylvania</SelectItem>
+                    <SelectItem value="RI">Rhode Island</SelectItem>
+                    <SelectItem value="SC">South Carolina</SelectItem>
+                    <SelectItem value="SD">South Dakota</SelectItem>
+                    <SelectItem value="TN">Tennessee</SelectItem>
+                    <SelectItem value="TX">Texas</SelectItem>
+                    <SelectItem value="UT">Utah</SelectItem>
+                    <SelectItem value="VT">Vermont</SelectItem>
+                    <SelectItem value="VA">Virginia</SelectItem>
+                    <SelectItem value="WA">Washington</SelectItem>
+                    <SelectItem value="WV">West Virginia</SelectItem>
+                    <SelectItem value="WI">Wisconsin</SelectItem>
+                    <SelectItem value="WY">Wyoming</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -16,6 +16,7 @@ import Messages from "@/pages/Messages";
 import MessagesList from "@/pages/MessagesList";
 import Review from "@/pages/Review";
 import Profile from "@/pages/Profile";
+import ProfileView from "@/pages/ProfileView";
 import MyJobs from "@/pages/MyJobs";
 import Wallet from "@/pages/Wallet";
 import AdminLicenses from "@/pages/AdminLicenses";
@@ -54,6 +55,7 @@ function Router() {
           <Route path="/messages" component={MessagesList} />
           <Route path="/messages/:jobId" component={Messages} />
           <Route path="/profile" component={Profile} />
+          <Route path="/profile/:userId" component={ProfileView} />
           <Route path="/my-jobs" component={MyJobs} />
           <Route path="/wallet" component={Wallet} />
           <Route path="/admin/licenses" component={AdminLicenses} />

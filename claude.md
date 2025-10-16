@@ -36,6 +36,7 @@ git push origin main           # Triggers Render.com deployment
 - Stripe escrow payments with 20% platform fee
 - Real-time WebSocket messaging
 - Interactive Leaflet map with marker clustering
+- Radar.io address autocomplete for job creation
 - PostgreSQL database with Drizzle ORM
 
 ## Tech Stack
@@ -58,6 +59,7 @@ git push origin main           # Triggers Render.com deployment
 - **Styling**: Tailwind CSS
 - **Forms**: React Hook Form + Zod validation
 - **Maps**: React Leaflet + react-leaflet-cluster
+- **Address Autocomplete**: Radar.io API for smart address suggestions
 - **Theme**: next-themes for dark mode support
 
 ### Deployment
@@ -328,6 +330,36 @@ await storage.updateJob(jobId, {
 - Creates Stripe payout (note: requires Stripe Connect in production)
 - Creates payout transaction record
 
+### Address Autocomplete (Radar.io)
+**Location**: [client/src/pages/CreateJob.tsx](client/src/pages/CreateJob.tsx) - Address input field
+
+Uses Radar.io API for intelligent address suggestions as users type:
+```typescript
+const response = await fetch(
+  `https://api.radar.io/v1/search/autocomplete?query=${encodeURIComponent(query)}&layers=address&limit=5`,
+  {
+    headers: {
+      'Authorization': radarKey,
+    },
+  }
+);
+```
+
+**Features**:
+- Real-time address suggestions as user types (300ms debounce)
+- Auto-fills address line 1, city, state, and ZIP code
+- Validates and formats addresses automatically
+- Reduces data entry errors
+- Uses Radar.io live API keys (stored in environment variables)
+
+**Flow**:
+1. User starts typing in Address Line 1 field
+2. After 300ms debounce, Radar API is called with query
+3. Dropdown shows up to 5 matching addresses
+4. User clicks a suggestion
+5. Form fields auto-fill: addressLine1, city, state, zipCode
+6. User can still manually edit any field if needed
+
 ### Geocoding
 **Location**: [server/routes.ts](server/routes.ts) - `POST /api/jobs`
 
@@ -456,6 +488,10 @@ JWT_SECRET=your-super-secret-jwt-key-minimum-32-characters
 # Stripe
 STRIPE_SECRET_KEY=sk_test_... or sk_live_...
 VITE_STRIPE_PUBLIC_KEY=pk_test_... or pk_live_...
+
+# Radar.io (Address Autocomplete)
+RADAR_SECRET_KEY=prj_live_sk_...
+VITE_RADAR_PUBLIC_KEY=prj_live_pk_...
 
 # Server (auto-configured on Render)
 PORT=5000

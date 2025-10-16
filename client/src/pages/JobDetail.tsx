@@ -473,9 +473,11 @@ export default function JobDetail() {
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
                   <UserIcon className="h-4 w-4 text-muted-foreground" />
-                  <p className="font-medium text-card-foreground">
-                    {job.poster.firstName} {job.poster.lastName}
-                  </p>
+                  <Link href={`/profile/${job.poster.id}`}>
+                    <p className="font-medium text-card-foreground hover:text-primary cursor-pointer transition-colors">
+                      {job.poster.firstName} {job.poster.lastName}
+                    </p>
+                  </Link>
                 </div>
                 {/* Only show phone after job is claimed */}
                 {job.poster.phone && job.status !== 'open' && (
@@ -518,9 +520,11 @@ export default function JobDetail() {
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
                   <UserIcon className="h-4 w-4 text-muted-foreground" />
-                  <p className="font-medium text-card-foreground">
-                    {(isJobClaimer ? job.poster : job.claimer)?.firstName} {(isJobClaimer ? job.poster : job.claimer)?.lastName}
-                  </p>
+                  <Link href={`/profile/${(isJobClaimer ? job.poster : job.claimer)?.id}`}>
+                    <p className="font-medium text-card-foreground hover:text-primary cursor-pointer transition-colors">
+                      {(isJobClaimer ? job.poster : job.claimer)?.firstName} {(isJobClaimer ? job.poster : job.claimer)?.lastName}
+                    </p>
+                  </Link>
                 </div>
                 {(isJobClaimer ? job.poster : job.claimer)?.phone && (
                   <div className="flex items-center gap-2 mb-1">

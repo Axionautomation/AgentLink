@@ -246,6 +246,79 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     }
   });
 
+  // Update user profile (age, brokerage, bio, profileImageUrl)
+  app.patch('/api/auth/user/profile', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
+      const { age, brokerage, bio, profileImageUrl } = req.body;
+
+      const currentUser = await storage.getUser(userId);
+      if (!currentUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Build update object only with provided fields
+      const updates: any = { ...currentUser };
+
+      if (age !== undefined) {
+        updates.age = age ? parseInt(age) : null;
+      }
+      if (brokerage !== undefined) {
+        updates.brokerage = brokerage?.trim() || null;
+      }
+      if (bio !== undefined) {
+        updates.bio = bio?.trim() || null;
+      }
+      if (profileImageUrl !== undefined) {
+        updates.profileImageUrl = profileImageUrl?.trim() || null;
+      }
+
+      // Explicitly prevent isAdmin from being changed - preserve existing value
+      updates.isAdmin = currentUser.isAdmin || false;
+      updates.updatedAt = new Date();
+
+      const updatedUser = await storage.upsertUser(updates);
+
+      // Don't send password to client
+      const { password, ...userWithoutPassword } = updatedUser;
+      res.json(userWithoutPassword);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get public user profile by ID
+  app.get('/api/users/:userId', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      // Return only public profile information (no sensitive data)
+      const publicProfile = {
+        id: user.id,
+        email: user.email, // Visible for contact
+        firstName: user.firstName,
+        lastName: user.lastName,
+        profileImageUrl: user.profileImageUrl,
+        age: user.age,
+        brokerage: user.brokerage,
+        bio: user.bio,
+        licenseVerified: user.licenseVerified,
+        rating: user.rating,
+        totalJobs: user.totalJobs,
+        completedJobs: user.completedJobs,
+      };
+
+      res.json(publicProfile);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ==================== Admin Routes ====================
 
   app.get('/api/admin/pending-licenses', authenticateToken, isAdmin, async (req: AuthRequest, res) => {

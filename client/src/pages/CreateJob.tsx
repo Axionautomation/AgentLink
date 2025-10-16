@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -42,6 +42,19 @@ const formSchema = insertJobSchema.extend({
 
 type FormData = z.infer<typeof formSchema>;
 
+interface RadarAddress {
+  formattedAddress: string;
+  addressLabel?: string;
+  number?: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  stateCode?: string;
+  postalCode?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
 export default function CreateJob() {
   const { user, isLoading: authLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
@@ -49,6 +62,11 @@ export default function CreateJob() {
   const [showOtherType, setShowOtherType] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<Array<{name: string, url: string, type: string, size: number}>>([]);
   const [uploading, setUploading] = useState(false);
+  const [addressSuggestions, setAddressSuggestions] = useState<RadarAddress[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [searchingAddress, setSearchingAddress] = useState(false);
+  const [selectedCoordinates, setSelectedCoordinates] = useState<{lat: number, lng: number} | null>(null);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -139,6 +157,88 @@ export default function CreateJob() {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  // Radar address autocomplete
+  const searchAddress = async (query: string) => {
+    if (!query || query.length < 3) {
+      setAddressSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    setSearchingAddress(true);
+    try {
+      const radarKey = import.meta.env.VITE_RADAR_PUBLIC_KEY;
+      const response = await fetch(
+        `https://api.radar.io/v1/search/autocomplete?query=${encodeURIComponent(query)}&layers=address&limit=5`,
+        {
+          headers: {
+            'Authorization': radarKey,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch address suggestions');
+      }
+
+      const data = await response.json();
+
+      if (data.addresses && data.addresses.length > 0) {
+        const suggestions: RadarAddress[] = data.addresses.map((addr: any) => ({
+          formattedAddress: addr.formattedAddress,
+          addressLabel: addr.addressLabel,
+          number: addr.number,
+          street: addr.street,
+          city: addr.city,
+          state: addr.state,
+          stateCode: addr.stateCode,
+          postalCode: addr.postalCode,
+          latitude: addr.latitude,
+          longitude: addr.longitude,
+        }));
+        setAddressSuggestions(suggestions);
+        setShowSuggestions(true);
+      } else {
+        setAddressSuggestions([]);
+        setShowSuggestions(false);
+      }
+    } catch (error) {
+      console.error('Address search error:', error);
+      setAddressSuggestions([]);
+      setShowSuggestions(false);
+    } finally {
+      setSearchingAddress(false);
+    }
+  };
+
+  // Auto-fill address fields when user selects a suggestion
+  const selectAddress = (address: RadarAddress) => {
+    const streetAddress = address.number && address.street
+      ? `${address.number} ${address.street}`
+      : address.addressLabel || '';
+
+    form.setValue('addressLine1', streetAddress);
+    form.setValue('city', address.city || '');
+    form.setValue('state', address.stateCode || '');
+    form.setValue('zipCode', address.postalCode || '');
+
+    // Store coordinates from Radar
+    if (address.latitude && address.longitude) {
+      setSelectedCoordinates({
+        lat: address.latitude,
+        lng: address.longitude,
+      });
+    }
+
+    setShowSuggestions(false);
+    setAddressSuggestions([]);
+
+    toast({
+      title: "Address Auto-filled",
+      description: "Please verify all fields are correct",
+    });
+  };
+
   const createJobMutation = useMutation({
     mutationFn: async (data: FormData) => {
       // Convert date string to Date object
@@ -147,17 +247,28 @@ export default function CreateJob() {
       // Build full address
       const fullAddress = `${data.addressLine1}${data.addressLine2 ? ', ' + data.addressLine2 : ''}, ${data.city}, ${data.state} ${data.zipCode}`;
 
-      // Geocode the address using OpenStreetMap Nominatim API
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullAddress)}`;
-      const geocodeResponse = await fetch(geocodeUrl);
-      const geocodeData = await geocodeResponse.json();
-
       let propertyLat = null;
       let propertyLng = null;
 
-      if (geocodeData && geocodeData.length > 0) {
-        propertyLat = geocodeData[0].lat;
-        propertyLng = geocodeData[0].lon;
+      // Use Radar coordinates if available (from autocomplete selection)
+      if (selectedCoordinates) {
+        propertyLat = selectedCoordinates.lat.toString();
+        propertyLng = selectedCoordinates.lng.toString();
+      } else {
+        // Fall back to OpenStreetMap Nominatim API if address was entered manually
+        try {
+          const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullAddress)}`;
+          const geocodeResponse = await fetch(geocodeUrl);
+          const geocodeData = await geocodeResponse.json();
+
+          if (geocodeData && geocodeData.length > 0) {
+            propertyLat = geocodeData[0].lat;
+            propertyLng = geocodeData[0].lon;
+          }
+        } catch (error) {
+          console.error('Geocoding error:', error);
+          // Continue without coordinates if geocoding fails
+        }
       }
 
       // Convert string fee and duration to proper format
@@ -249,13 +360,65 @@ export default function CreateJob() {
                     <FormItem>
                       <FormLabel>Address Line 1 *</FormLabel>
                       <FormControl>
-                        <Input
-                          {...field}
-                          placeholder="123 Main Street"
-                          className="rounded-lg"
-                          data-testid="input-address-line-1"
-                        />
+                        <div className="relative">
+                          <Input
+                            {...field}
+                            placeholder="Start typing address..."
+                            className="rounded-lg"
+                            data-testid="input-address-line-1"
+                            onChange={(e) => {
+                              field.onChange(e);
+
+                              // Debounce address search
+                              if (debounceTimerRef.current) {
+                                clearTimeout(debounceTimerRef.current);
+                              }
+
+                              debounceTimerRef.current = setTimeout(() => {
+                                searchAddress(e.target.value);
+                              }, 300);
+                            }}
+                            onBlur={() => {
+                              // Delay hiding suggestions to allow click
+                              setTimeout(() => setShowSuggestions(false), 200);
+                            }}
+                            onFocus={() => {
+                              if (addressSuggestions.length > 0) {
+                                setShowSuggestions(true);
+                              }
+                            }}
+                          />
+                          {searchingAddress && (
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                              <div className="animate-spin h-4 w-4 border-2 border-primary border-t-transparent rounded-full" />
+                            </div>
+                          )}
+
+                          {/* Autocomplete Dropdown */}
+                          {showSuggestions && addressSuggestions.length > 0 && (
+                            <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                              {addressSuggestions.map((suggestion, index) => (
+                                <button
+                                  key={index}
+                                  type="button"
+                                  onClick={() => selectAddress(suggestion)}
+                                  className="w-full text-left px-4 py-3 hover:bg-muted transition-colors border-b border-border last:border-b-0"
+                                >
+                                  <p className="text-sm font-medium text-card-foreground">
+                                    {suggestion.addressLabel || suggestion.formattedAddress}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {suggestion.city}, {suggestion.stateCode} {suggestion.postalCode}
+                                  </p>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </FormControl>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Start typing to see address suggestions
+                      </p>
                       <FormMessage />
                     </FormItem>
                   )}

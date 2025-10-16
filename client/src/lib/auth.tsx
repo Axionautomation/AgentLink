@@ -6,7 +6,20 @@ interface User {
   email: string;
   firstName: string;
   lastName: string;
+  profileImageUrl?: string;
+  age?: number;
+  brokerage?: string;
+  bio?: string;
+  phone?: string;
+  licenseNumber?: string;
+  licenseState?: string;
   licenseVerified?: boolean;
+  licenseDocumentUrl?: string;
+  rating?: string;
+  totalJobs?: number;
+  completedJobs?: number;
+  bankName?: string;
+  bankAccountLast4?: string;
   isAdmin?: boolean;
 }
 
