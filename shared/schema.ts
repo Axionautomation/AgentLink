@@ -97,6 +97,7 @@ export const jobs = pgTable("jobs", {
   description: text("description"),
   specialInstructions: text("special_instructions"),
   mlsListingUrl: varchar("mls_listing_url"), // Link to MLS listing
+  attachmentUrls: jsonb("attachment_urls"), // Array of file URLs [{name: string, url: string, type: string}]
   
   // Payment
   fee: decimal("fee", { precision: 10, scale: 2 }).notNull(),

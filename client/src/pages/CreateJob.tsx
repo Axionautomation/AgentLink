@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArrowLeft, MapPin, Info } from "lucide-react";
+import { ArrowLeft, MapPin, Info, Upload, X, File, Image as ImageIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { insertJobSchema, type InsertJob } from "@shared/schema";
 import { z } from "zod";
@@ -47,6 +47,8 @@ export default function CreateJob() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [showOtherType, setShowOtherType] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{name: string, url: string, type: string, size: number}>>([]);
+  const [uploading, setUploading] = useState(false);
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -90,6 +92,52 @@ export default function CreateJob() {
     }
   }, [user, form]);
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploading(true);
+    const formData = new FormData();
+
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+
+    try {
+      const token = localStorage.getItem('agentlink_auth_token');
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const data = await response.json();
+      setUploadedFiles(prev => [...prev, ...data.files]);
+      toast({
+        title: "Files Uploaded",
+        description: `${data.files.length} file(s) uploaded successfully`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Upload Failed",
+        description: error.message || "Failed to upload files",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   const createJobMutation = useMutation({
     mutationFn: async (data: FormData) => {
       // Convert date string to Date object
@@ -122,6 +170,7 @@ export default function CreateJob() {
         duration: parseInt(data.duration),
         platformFee: (parseFloat(data.fee) * 0.2).toFixed(2),
         payoutAmount: (parseFloat(data.fee) * 0.8).toFixed(2),
+        attachmentUrls: uploadedFiles.length > 0 ? uploadedFiles : null,
       };
 
       const response = await apiRequest("POST", "/api/jobs", jobData);
@@ -514,6 +563,64 @@ export default function CreateJob() {
                   </FormItem>
                 )}
               />
+
+              {/* File Upload Section */}
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-card-foreground">
+                  Attachments (Images & Documents)
+                </label>
+                <div className="flex flex-col gap-3">
+                  <label className="cursor-pointer">
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*,.pdf,.doc,.docx,.txt"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      disabled={uploading}
+                    />
+                    <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:bg-muted/50 transition-colors">
+                      <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">
+                        {uploading ? 'Uploading...' : 'Click to upload files'}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Images, PDF, DOC, TXT (max 10MB each)
+                      </p>
+                    </div>
+                  </label>
+
+                  {uploadedFiles.length > 0 && (
+                    <div className="space-y-2">
+                      {uploadedFiles.map((file, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center gap-3 p-3 border border-border rounded-lg bg-card"
+                        >
+                          {file.type.startsWith('image/') ? (
+                            <ImageIcon className="h-5 w-5 text-primary" />
+                          ) : (
+                            <File className="h-5 w-5 text-primary" />
+                          )}
+                          <span className="text-sm flex-1 truncate">{file.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {(file.size / 1024).toFixed(1)} KB
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeFile(index)}
+                            className="h-8 w-8"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
 
               <div className="flex gap-4">
                 <Button

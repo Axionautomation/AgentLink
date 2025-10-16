@@ -13,6 +13,9 @@ import {
   type AuthRequest
 } from "./auth";
 import { insertJobSchema, insertMessageSchema, insertReviewSchema } from "@shared/schema";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 
 // Initialize Stripe
 if (!process.env.STRIPE_SECRET_KEY) {
@@ -20,6 +23,39 @@ if (!process.env.STRIPE_SECRET_KEY) {
 }
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-11-20.acacia",
+});
+
+// Configure multer for file uploads
+const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const storage_multer = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  }
+});
+
+const upload = multer({
+  storage: storage_multer,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: function (req, file, cb) {
+    // Allow images and documents
+    const allowedTypes = /jpeg|jpg|png|pdf|doc|docx|txt/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (extname && mimetype) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only images and documents (PDF, DOC, DOCX, TXT) are allowed'));
+    }
+  }
 });
 
 // Admin authorization middleware
@@ -231,6 +267,31 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
       res.json(approvedUser);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ==================== File Upload Routes ====================
+
+  // Upload files for job attachments
+  app.post('/api/upload', authenticateToken, upload.array('files', 10), async (req: AuthRequest, res) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+
+      if (!files || files.length === 0) {
+        return res.status(400).json({ message: 'No files uploaded' });
+      }
+
+      const fileData = files.map(file => ({
+        name: file.originalname,
+        url: `/uploads/${file.filename}`,
+        type: file.mimetype,
+        size: file.size
+      }));
+
+      res.json({ files: fileData });
+    } catch (error: any) {
+      console.error('File upload error:', error);
+      res.status(500).json({ message: error.message || 'Failed to upload files' });
     }
   });
 

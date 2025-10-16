@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArrowLeft, MapPin, Clock, DollarSign, Home, Building2, CheckCircle2, MapPinned, MessageSquare, ExternalLink, Info, Phone, User as UserIcon } from "lucide-react";
+import { ArrowLeft, MapPin, Clock, DollarSign, Home, Building2, CheckCircle2, MapPinned, MessageSquare, ExternalLink, Info, Phone, User as UserIcon, Download, File, Image as ImageIcon } from "lucide-react";
 import { Link, useLocation, useParams } from "wouter";
 import type { Job, User } from "@shared/schema";
 
@@ -354,6 +354,37 @@ export default function JobDetail() {
             <div className="pt-4 border-t border-border">
               <p className="text-sm text-muted-foreground mb-2">Special Instructions</p>
               <p className="text-card-foreground">{job.specialInstructions}</p>
+            </div>
+          )}
+
+          {job.attachmentUrls && Array.isArray(job.attachmentUrls) && job.attachmentUrls.length > 0 && (
+            <div className="pt-4 border-t border-border">
+              <p className="text-sm text-muted-foreground mb-3">Attachments</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {job.attachmentUrls.map((file: any, index: number) => (
+                  <a
+                    key={index}
+                    href={file.url}
+                    download={file.name}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-muted/50 transition-colors group"
+                  >
+                    {file.type?.startsWith('image/') ? (
+                      <ImageIcon className="h-5 w-5 text-primary flex-shrink-0" />
+                    ) : (
+                      <File className="h-5 w-5 text-primary flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{file.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {file.size ? `${(file.size / 1024).toFixed(1)} KB` : 'Download'}
+                      </p>
+                    </div>
+                    <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
+                  </a>
+                ))}
+              </div>
             </div>
           )}
         </Card>
