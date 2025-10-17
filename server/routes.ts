@@ -146,7 +146,7 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     }
   });
 
-  // Login user
+  // Login user (age field is optional for all users)
   app.post('/api/auth/login', async (req, res) => {
     try {
       const { email, password } = req.body;
