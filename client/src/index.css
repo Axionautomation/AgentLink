@@ -183,10 +183,10 @@
 
   --popover-border: 217 33% 20%;
 
-  /* Brand Primary (Dark): 220 85% 25% */
-  --primary: 220 85% 25%;
+  /* Brand Primary for Dark Mode - Light Blue for visibility: 220 80% 70% */
+  --primary: 220 80% 70%;
 
-  --primary-foreground: 0 0% 100%;
+  --primary-foreground: 222 47% 11%;
 
   --secondary: 217 33% 17%;
 
