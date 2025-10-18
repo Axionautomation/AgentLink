@@ -422,9 +422,9 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
       console.log('Received job creation request:', JSON.stringify(req.body, null, 2));
       const validatedData = insertJobSchema.parse(req.body);
 
-      // Calculate platform fee (20%)
+      // Calculate platform fee (10%)
       const fee = parseFloat(validatedData.fee);
-      const platformFee = fee * 0.20;
+      const platformFee = fee * 0.10;
       const payoutAmount = fee - platformFee;
 
       // Create job without payment
@@ -451,11 +451,35 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     }
   });
 
-  // Claim job - creates payment intent for poster to pay
+  // Claim job - creates destination charge with 10% platform fee
   app.post("/api/jobs/:id/claim", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const userId = req.user!.userId;
       console.log('Claiming job:', req.params.id, 'by user:', userId);
+
+      // Get claimer info first to verify Stripe Connect status
+      const claimer = await storage.getUser(userId);
+      if (!claimer) {
+        console.error('Job claim failed: Claimer not found', userId);
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Verify claimer has completed Stripe Connect onboarding
+      if (!claimer.stripeAccountId) {
+        return res.status(400).json({
+          message: "Please connect your Stripe account before claiming jobs",
+          requiresOnboarding: true
+        });
+      }
+
+      // Verify Stripe account is fully onboarded
+      const claimerAccount = await stripe.accounts.retrieve(claimer.stripeAccountId);
+      if (!claimerAccount.charges_enabled || !claimerAccount.details_submitted) {
+        return res.status(400).json({
+          message: "Please complete your Stripe account setup before claiming jobs",
+          requiresOnboarding: true
+        });
+      }
 
       const job = await storage.claimJob(req.params.id, userId);
 
@@ -496,11 +520,15 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
         }
       }
 
-      // Create Stripe Checkout Session for payment
+      // Calculate 10% platform fee
       const fee = parseFloat(job.fee);
-      console.log('Creating Checkout Session for amount:', fee, 'cents:', Math.round(fee * 100));
+      const platformFeeAmount = Math.round(fee * 0.10 * 100); // 10% in cents
+      const totalAmount = Math.round(fee * 100); // Total in cents
+
+      console.log('Creating Checkout Session with destination charge - Total:', totalAmount, 'Platform fee:', platformFeeAmount);
 
       try {
+        // Create Stripe Checkout Session with destination charge (Stripe Connect)
         const checkoutSession = await stripe.checkout.sessions.create({
           customer: customerId,
           mode: 'payment',
@@ -509,7 +537,7 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
             {
               price_data: {
                 currency: 'usd',
-                unit_amount: Math.round(fee * 100),
+                unit_amount: totalAmount,
                 product_data: {
                   name: `AgentLink Job - ${job.propertyType.replace('_', ' ')}`,
                   description: `${job.propertyAddress} - ${new Date(job.scheduledDate).toLocaleDateString()}`,
@@ -519,7 +547,11 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
             },
           ],
           payment_intent_data: {
-            capture_method: 'manual', // Hold in escrow
+            // Destination charge - automatically transfer to claimer's connected account
+            application_fee_amount: platformFeeAmount, // 10% platform fee
+            transfer_data: {
+              destination: claimer.stripeAccountId, // Claimer's connected account
+            },
             metadata: {
               jobId: job.id,
               posterId: job.posterId,
@@ -535,7 +567,7 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
           },
         });
 
-        console.log('Checkout Session created:', checkoutSession.id);
+        console.log('Checkout Session created with destination charge:', checkoutSession.id);
 
         // Update job with checkout session ID
         await storage.updateJob(job.id, {
@@ -547,7 +579,7 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
           userId: job.posterId,
           type: 'job_claimed',
           title: 'Job Claimed - Payment Required',
-          message: `Your job at ${job.propertyAddress} has been claimed. Please complete payment to confirm.`,
+          message: `Your job at ${job.propertyAddress} has been claimed by ${claimer.firstName} ${claimer.lastName}. Please complete payment to confirm.`,
           jobId: job.id,
         });
 
@@ -794,7 +826,7 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     }
   });
 
-  // Complete job and release payment
+  // Complete job - payment already transferred via destination charge
   app.post("/api/jobs/:id/complete", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const userId = req.user!.userId;
@@ -808,39 +840,14 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
         return res.status(403).json({ message: "Not authorized" });
       }
 
-      if (!job.paymentIntentId) {
-        return res.status(400).json({ message: "No payment intent found" });
+      // Verify payment was completed
+      if (!job.paymentReleased) {
+        return res.status(400).json({ message: "Payment must be confirmed before completing job" });
       }
 
-      // Capture the payment (release from escrow) with platform fee
-      const captured = await stripe.paymentIntents.capture(job.paymentIntentId);
-
-      // Record escrow release transaction
-      await storage.createTransaction({
-        jobId: job.id,
-        payerId: job.posterId,
-        payeeId: job.claimerId || undefined,
-        type: 'escrow_release',
-        amount: job.fee,
-        platformFee: job.platformFee || '0',
-        netAmount: job.payoutAmount || job.fee,
-        stripePaymentIntentId: job.paymentIntentId,
-        status: 'completed',
-      });
-
-      // Record platform fee transaction
-      await storage.createTransaction({
-        jobId: job.id,
-        payerId: job.posterId,
-        type: 'platform_fee',
-        amount: job.platformFee || '0',
-        stripePaymentIntentId: job.paymentIntentId,
-        status: 'completed',
-      });
-
+      // Update job status to completed
       const updated = await storage.updateJob(req.params.id, {
         status: 'completed',
-        paymentReleased: true,
       });
 
       // Update agent stats
@@ -855,19 +862,20 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
         }
       }
 
-      // Notify claimer of payment
+      // Notify claimer of job completion
       if (job.claimerId) {
         await storage.createNotification({
           userId: job.claimerId,
-          type: 'payment_received',
-          title: 'Payment Received',
-          message: `You've received $${job.payoutAmount} for the job at ${job.propertyAddress}`,
+          type: 'job_completed',
+          title: 'Job Completed',
+          message: `Job at ${job.propertyAddress} has been marked as completed. Payment of $${job.payoutAmount} is in your Stripe account.`,
           jobId: job.id,
         });
       }
 
       res.json(updated);
     } catch (error: any) {
+      console.error('Job completion error:', error);
       res.status(500).json({ message: error.message });
     }
   });
@@ -1059,6 +1067,128 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     }
   });
 
+  // ==================== Stripe Connect Routes ====================
+
+  // Create Stripe Connected Account for claimer (agent receiving payments)
+  app.post("/api/stripe/create-connected-account", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Check if user already has a connected account
+      if (user.stripeAccountId) {
+        return res.json({
+          accountId: user.stripeAccountId,
+          message: "Connected account already exists"
+        });
+      }
+
+      // Create Stripe Connected Account (Express account type for simplest onboarding)
+      const account = await stripe.accounts.create({
+        type: 'express',
+        country: 'US',
+        email: user.email,
+        capabilities: {
+          transfers: { requested: true },
+        },
+        business_type: 'individual',
+        metadata: {
+          userId: user.id,
+          userEmail: user.email,
+        },
+      });
+
+      console.log('Created Stripe Connected Account:', account.id);
+
+      // Save account ID to user
+      await storage.upsertUser({
+        ...user,
+        stripeAccountId: account.id,
+      });
+
+      res.json({
+        accountId: account.id,
+        message: "Connected account created successfully"
+      });
+    } catch (error: any) {
+      console.error('Create connected account error:', error);
+      res.status(500).json({ message: error.message || 'Failed to create connected account' });
+    }
+  });
+
+  // Create Account Link for Stripe Connect onboarding
+  app.post("/api/stripe/create-account-link", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (!user.stripeAccountId) {
+        return res.status(400).json({ message: "No connected account found. Please create one first." });
+      }
+
+      const origin = process.env.CLIENT_URL || 'https://agentlink.onrender.com';
+
+      // Create Account Link for onboarding
+      const accountLink = await stripe.accountLinks.create({
+        account: user.stripeAccountId,
+        refresh_url: `${origin}/profile?stripe_refresh=true`,
+        return_url: `${origin}/profile?stripe_connected=true`,
+        type: 'account_onboarding',
+      });
+
+      console.log('Created Account Link for:', user.stripeAccountId);
+
+      res.json({ url: accountLink.url });
+    } catch (error: any) {
+      console.error('Create account link error:', error);
+      res.status(500).json({ message: error.message || 'Failed to create account link' });
+    }
+  });
+
+  // Get Stripe Connected Account status
+  app.get("/api/stripe/account-status", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (!user.stripeAccountId) {
+        return res.json({
+          connected: false,
+          accountId: null,
+          chargesEnabled: false,
+          detailsSubmitted: false
+        });
+      }
+
+      // Retrieve account from Stripe to check status
+      const account = await stripe.accounts.retrieve(user.stripeAccountId);
+
+      res.json({
+        connected: true,
+        accountId: account.id,
+        chargesEnabled: account.charges_enabled,
+        detailsSubmitted: account.details_submitted,
+        payoutsEnabled: account.payouts_enabled,
+        requirements: account.requirements,
+      });
+    } catch (error: any) {
+      console.error('Get account status error:', error);
+      res.status(500).json({ message: error.message || 'Failed to get account status' });
+    }
+  });
+
   // ==================== Payment Routes ====================
 
   // Get Stripe Checkout URL for a job
@@ -1198,7 +1328,7 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
     }
   });
 
-  // Confirm payment successful - mark escrow as held
+  // Confirm payment successful - record transactions for destination charge
   app.post("/api/jobs/:jobId/confirm-payment", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const userId = req.user!.userId;
@@ -1220,13 +1350,22 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
         return res.status(400).json({ message: "No payment intent found" });
       }
 
-      // Verify payment was successful with Stripe
-      console.log('Retrieving payment intent:', job.paymentIntentId);
-      const paymentIntent = await stripe.paymentIntents.retrieve(job.paymentIntentId);
+      // Get the checkout session to retrieve the payment intent
+      console.log('Retrieving checkout session:', job.paymentIntentId);
+      const session = await stripe.checkout.sessions.retrieve(job.paymentIntentId);
+
+      if (!session.payment_intent) {
+        console.error('Payment confirmation failed: No payment intent in session', { jobId: job.id });
+        return res.status(400).json({ message: "No payment intent found in session" });
+      }
+
+      // Retrieve the actual payment intent
+      const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent as string);
       console.log('Payment intent status:', paymentIntent.status, 'Amount:', paymentIntent.amount);
 
-      // Accept various valid payment states
-      const validStates = ['requires_capture', 'succeeded', 'processing'];
+      // With destination charges, payment is automatically captured and transferred
+      // Valid states: succeeded (immediate), processing (async like ACH)
+      const validStates = ['succeeded', 'processing'];
       if (!validStates.includes(paymentIntent.status)) {
         console.error('Payment confirmation failed: Invalid status', {
           jobId: job.id,
@@ -1238,39 +1377,59 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
         });
       }
 
-      console.log('Payment intent validated, updating job:', job.id);
+      console.log('Payment intent validated, recording transactions:', job.id);
 
-      // Update job - mark escrow as held
+      // Calculate amounts
+      const totalAmount = parseFloat(job.fee);
+      const platformFee = parseFloat(job.platformFee || '0');
+      const agentPayout = parseFloat(job.payoutAmount || (totalAmount - platformFee).toFixed(2));
+
+      // Update job - mark payment as completed (funds already transferred)
       const updatedJob = await storage.updateJob(req.params.jobId, {
-        escrowHeld: true,
+        escrowHeld: true, // Keep for backwards compatibility
+        paymentReleased: true, // Funds already transferred via destination charge
       });
 
-      // Record transaction
+      // Record platform fee transaction
+      await storage.createTransaction({
+        jobId: job.id,
+        payerId: job.posterId,
+        type: 'platform_fee',
+        amount: platformFee.toFixed(2),
+        stripePaymentIntentId: session.payment_intent as string,
+        status: 'completed',
+        description: `Platform fee (10%) for job at ${job.propertyAddress}`,
+      });
+
+      // Record agent transfer transaction
       await storage.createTransaction({
         jobId: job.id,
         payerId: job.posterId,
         payeeId: job.claimerId || undefined,
-        type: 'escrow_hold',
-        amount: job.fee,
-        platformFee: job.platformFee || '0',
-        netAmount: job.payoutAmount || job.fee,
-        stripePaymentIntentId: job.paymentIntentId,
-        status: 'held',
+        type: 'transfer',
+        amount: totalAmount.toFixed(2),
+        platformFee: platformFee.toFixed(2),
+        netAmount: agentPayout.toFixed(2),
+        stripePaymentIntentId: session.payment_intent as string,
+        stripeTransferId: paymentIntent.transfer as string || undefined,
+        status: 'completed',
+        description: `Payment for job at ${job.propertyAddress}`,
       });
 
-      // Notify claimer that payment is held
+      // Notify claimer that payment has been received
       if (job.claimerId) {
         await storage.createNotification({
           userId: job.claimerId,
-          type: 'job_confirmed',
-          title: 'Job Confirmed',
-          message: `Payment received for job at ${job.propertyAddress}. You can now proceed with the job.`,
+          type: 'payment_received',
+          title: 'Payment Received',
+          message: `$${agentPayout.toFixed(2)} has been transferred to your Stripe account for the job at ${job.propertyAddress}. You can now proceed with the job.`,
           jobId: job.id,
         });
       }
 
       res.json(updatedJob);
     } catch (error: any) {
+      console.error('Payment confirmation error:', error);
       res.status(500).json({ message: error.message });
     }
   });

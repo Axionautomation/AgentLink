@@ -33,7 +33,7 @@ git push origin main           # Triggers Render.com deployment
 **AgentLink** is a real estate agent marketplace platform that connects agents for showing and open house coverage. It features:
 - GPS-based job verification (200ft radius)
 - Custom JWT authentication with bcrypt
-- Stripe escrow payments with 20% platform fee
+- **Stripe Connect destination charges with 10% platform fee**
 - Real-time WebSocket messaging
 - Interactive Leaflet map with marker clustering
 - Radar.io address autocomplete for job creation
@@ -201,14 +201,19 @@ shared/
 - `POST /api/auth/login` - Login user
 - `GET /api/auth/user` - Get current user (requires auth)
 
+### Stripe Connect
+- `POST /api/stripe/create-connected-account` - Create Stripe Connected Account for claimer
+- `POST /api/stripe/create-account-link` - Generate onboarding URL for Stripe Connect
+- `GET /api/stripe/account-status` - Check connected account status and onboarding completion
+
 ### Jobs
 - `GET /api/jobs` - List all open jobs (with poster info)
 - `GET /api/jobs/:id` - Get job details
-- `POST /api/jobs` - Create job (creates Stripe PaymentIntent)
-- `POST /api/jobs/:id/claim` - Claim a job
+- `POST /api/jobs` - Create job (calculates 10% platform fee)
+- `POST /api/jobs/:id/claim` - Claim a job (creates destination charge, verifies Stripe Connect)
 - `POST /api/jobs/:id/check-in` - GPS check-in (200ft radius validation)
 - `POST /api/jobs/:id/check-out` - GPS check-out
-- `POST /api/jobs/:id/complete` - Complete job, capture payment, release escrow
+- `POST /api/jobs/:id/complete` - Complete job (payment already transferred)
 - `GET /api/my-jobs/posted` - User's posted jobs
 - `GET /api/my-jobs/claimed` - User's claimed jobs
 
@@ -264,71 +269,96 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 2. Server validates distance and creates check-out record
 3. Job ready to be completed by poster
 
-### Payment Flow (Stripe Escrow)
+### Payment Flow (Stripe Connect Destination Charges)
 **Location**: [server/routes.ts](server/routes.ts)
+
+**Overview**: AgentLink uses Stripe Connect with destination charges to automatically split payments between the platform and agents. When a job is claimed and paid for, 90% goes to the claimer's connected account and 10% stays with the platform.
 
 **1. Job Creation** (`POST /api/jobs`):
 ```typescript
-// Calculate fees
-const platformFee = fee * 0.20; // 20% platform fee
+// Calculate fees (10% platform fee)
+const fee = parseFloat(validatedData.fee);
+const platformFee = fee * 0.10;
 const payoutAmount = fee - platformFee;
 
-// Create PaymentIntent with manual capture
-const paymentIntent = await stripe.paymentIntents.create({
-  amount: Math.round(fee * 100), // Convert to cents
-  currency: 'usd',
-  customer: stripeCustomerId,
-  capture_method: 'manual', // Escrow mode
-  metadata: { jobId, posterId }
-});
-
-// Create transaction record
-await storage.createTransaction({
-  userId: posterId,
-  jobId,
-  type: 'escrow_hold',
-  amount: fee.toString(),
-  stripePaymentIntentId: paymentIntent.id,
-  status: 'pending'
-});
+// Job created without payment - payment happens when claimed
 ```
 
-**2. Payment Processing** (Checkout page):
-- User completes payment on `/checkout/:jobId` using Stripe Payment Element
-- Stripe confirms payment but does NOT capture yet (manual capture)
-- Redirects to `/payment-success`
+**2. Stripe Connect Onboarding** (Before claiming jobs):
+- Claimers must connect a Stripe account via `/profile`
+- Creates Express connected account: `stripe.accounts.create({ type: 'express' })`
+- Generates Account Link for onboarding: `stripe.accountLinks.create()`
+- User completes Stripe-hosted onboarding flow
+- Returns to profile page with connected account
 
-**3. Job Completion** (`POST /api/jobs/:id/complete`):
+**3. Job Claim** (`POST /api/jobs/:id/claim`):
 ```typescript
-// Capture the payment
-await stripe.paymentIntents.capture(paymentIntentId);
+// Verify claimer has completed Stripe Connect onboarding
+const claimerAccount = await stripe.accounts.retrieve(claimer.stripeAccountId);
+if (!claimerAccount.charges_enabled) {
+  return error("Please complete Stripe account setup");
+}
 
-// Create escrow release transaction
-await storage.createTransaction({
-  userId: claimerId,
-  type: 'escrow_release',
-  amount: payoutAmount.toString()
-});
+// Calculate 10% platform fee
+const platformFeeAmount = Math.round(fee * 0.10 * 100); // in cents
 
-// Create platform fee transaction
-await storage.createTransaction({
-  userId: posterId,
-  type: 'platform_fee',
-  amount: platformFee.toString()
-});
-
-// Update job status
-await storage.updateJob(jobId, {
-  status: 'completed',
-  paymentReleased: true
+// Create Checkout Session with destination charge
+const checkoutSession = await stripe.checkout.sessions.create({
+  customer: poster.stripeCustomerId,
+  line_items: [{ price_data: { amount: totalAmount }, quantity: 1 }],
+  payment_intent_data: {
+    application_fee_amount: platformFeeAmount, // 10% to platform
+    transfer_data: {
+      destination: claimer.stripeAccountId, // 90% to claimer
+    },
+  },
+  success_url: '/payment-success?jobId=' + jobId,
 });
 ```
 
-**4. Withdrawals** (`POST /api/create-payout`):
-- Calculates available balance: `sum(escrow_release) - sum(completed_payouts)`
-- Validates withdrawal amount against balance
-- Creates Stripe payout (note: requires Stripe Connect in production)
-- Creates payout transaction record
+**4. Payment Confirmation** (`POST /api/jobs/:jobId/confirm-payment`):
+```typescript
+// Retrieve checkout session and payment intent
+const session = await stripe.checkout.sessions.retrieve(sessionId);
+const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent);
+
+// Payment already captured and transferred automatically
+// Record transactions for tracking
+await storage.createTransaction({
+  type: 'platform_fee',
+  amount: platformFee,
+  status: 'completed',
+});
+
+await storage.createTransaction({
+  type: 'transfer',
+  amount: totalAmount,
+  platformFee,
+  netAmount: agentPayout,
+  stripeTransferId: paymentIntent.transfer,
+  status: 'completed',
+});
+
+// Mark payment as released (already transferred to claimer's account)
+await storage.updateJob(jobId, {
+  escrowHeld: true,
+  paymentReleased: true,
+});
+```
+
+**5. Job Completion** (`POST /api/jobs/:id/complete`):
+```typescript
+// Payment already transferred, just update status
+await storage.updateJob(jobId, { status: 'completed' });
+
+// Update agent stats
+claimer.completedJobs += 1;
+```
+
+**6. Payouts**:
+- Funds are automatically in the claimer's Stripe Connect account
+- Claimers manage their own payouts via Stripe Dashboard
+- No manual payout system needed - Stripe handles it all
 
 ### Address Autocomplete (Radar.io)
 **Location**: [client/src/pages/CreateJob.tsx](client/src/pages/CreateJob.tsx) - Address input field

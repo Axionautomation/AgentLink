@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Star, Briefcase, MapPin, Mail, Phone, LogOut, Shield, Award, Upload } from "lucide-react";
+import { ArrowLeft, Star, Briefcase, MapPin, Mail, Phone, LogOut, Shield, Award, Upload, CreditCard, CheckCircle, AlertCircle } from "lucide-react";
 import { Link } from "wouter";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -24,6 +24,19 @@ export default function Profile() {
   const [age, setAge] = useState(user?.age?.toString() || "");
   const [brokerage, setBrokerage] = useState(user?.brokerage || "");
   const [bio, setBio] = useState(user?.bio || "");
+
+  // Stripe Connect state
+  const [connectingStripe, setConnectingStripe] = useState(false);
+
+  // Fetch Stripe account status
+  const { data: stripeStatus, refetch: refetchStripeStatus } = useQuery({
+    queryKey: ["/api/stripe/account-status"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/stripe/account-status");
+      return response;
+    },
+    enabled: !!user,
+  });
 
   const handleProfileImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -120,6 +133,50 @@ export default function Profile() {
       });
     },
   });
+
+  // Handle Stripe Connect onboarding
+  const handleConnectStripe = async () => {
+    setConnectingStripe(true);
+    try {
+      // Create connected account if it doesn't exist
+      await apiRequest("POST", "/api/stripe/create-connected-account");
+
+      // Create account link for onboarding
+      const { url } = await apiRequest("POST", "/api/stripe/create-account-link");
+
+      // Redirect to Stripe onboarding
+      window.location.href = url;
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to connect Stripe account",
+        variant: "destructive",
+      });
+      setConnectingStripe(false);
+    }
+  };
+
+  // Check for Stripe Connect return parameters
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('stripe_connected') === 'true') {
+      toast({
+        title: "Stripe Account Connected",
+        description: "Your Stripe account has been successfully connected!",
+      });
+      refetchStripeStatus();
+      // Clean up URL
+      window.history.replaceState({}, '', '/profile');
+    } else if (params.get('stripe_refresh') === 'true') {
+      toast({
+        title: "Setup Incomplete",
+        description: "Please complete your Stripe account setup.",
+        variant: "destructive",
+      });
+      // Clean up URL
+      window.history.replaceState({}, '', '/profile');
+    }
+  }, [toast, refetchStripeStatus]);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -495,6 +552,103 @@ export default function Profile() {
             </div>
           </Card>
         )}
+
+        {/* Stripe Connect */}
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Payment Account
+            </h3>
+            {stripeStatus?.connected && stripeStatus?.chargesEnabled && (
+              <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded-full">
+                <CheckCircle className="h-3 w-3 mr-1" />
+                Connected
+              </Badge>
+            )}
+            {stripeStatus?.connected && !stripeStatus?.chargesEnabled && (
+              <Badge variant="outline" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-full">
+                <AlertCircle className="h-3 w-3 mr-1" />
+                Setup Incomplete
+              </Badge>
+            )}
+            {!stripeStatus?.connected && (
+              <Badge variant="outline" className="rounded-full">
+                Required to Accept Jobs
+              </Badge>
+            )}
+          </div>
+
+          <p className="text-sm text-muted-foreground">
+            Connect your Stripe account to receive payments for completed jobs. Funds are automatically transferred to your account when a poster confirms payment (90% of job fee).
+          </p>
+
+          {stripeStatus?.connected && stripeStatus?.chargesEnabled ? (
+            <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-card-foreground">Status</span>
+                <span className="text-sm text-muted-foreground">Active</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-card-foreground">Payments Enabled</span>
+                <span className="text-sm text-green-600 dark:text-green-400">Yes</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-card-foreground">Payouts Enabled</span>
+                <span className="text-sm text-green-600 dark:text-green-400">
+                  {stripeStatus.payoutsEnabled ? 'Yes' : 'Pending'}
+                </span>
+              </div>
+              <div className="pt-2 border-t border-border mt-3">
+                <Button
+                  variant="outline"
+                  onClick={handleConnectStripe}
+                  disabled={connectingStripe}
+                  className="w-full rounded-lg"
+                >
+                  {connectingStripe ? "Opening..." : "Manage Stripe Account"}
+                </Button>
+              </div>
+            </div>
+          ) : stripeStatus?.connected && !stripeStatus?.chargesEnabled ? (
+            <div className="space-y-3">
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                <p className="text-sm text-yellow-800 dark:text-yellow-400">
+                  Your Stripe account setup is incomplete. Please complete the onboarding process to start accepting jobs.
+                </p>
+              </div>
+              <Button
+                onClick={handleConnectStripe}
+                disabled={connectingStripe}
+                className="w-full rounded-lg"
+              >
+                {connectingStripe ? "Opening..." : "Complete Stripe Setup"}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                <p className="text-sm text-blue-800 dark:text-blue-400 mb-2">
+                  <strong>Important:</strong> You must connect a Stripe account before you can claim jobs.
+                </p>
+                <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 ml-4 list-disc">
+                  <li>Quick 2-minute setup</li>
+                  <li>Secure payment processing by Stripe</li>
+                  <li>Automatic payouts to your bank account</li>
+                  <li>90% of job fee goes to you (10% platform fee)</li>
+                </ul>
+              </div>
+              <Button
+                onClick={handleConnectStripe}
+                disabled={connectingStripe}
+                className="w-full rounded-lg"
+              >
+                <CreditCard className="h-4 w-4 mr-2" />
+                {connectingStripe ? "Opening Stripe..." : "Connect Stripe Account"}
+              </Button>
+            </div>
+          )}
+        </Card>
 
         {/* Stats */}
         <Card className="p-6">
