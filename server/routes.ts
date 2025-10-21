@@ -1076,16 +1076,50 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
       const user = await storage.getUser(userId);
 
       if (!user) {
+        console.error('Create connected account: User not found', { userId });
         return res.status(404).json({ message: "User not found" });
       }
 
+      console.log('Creating Stripe connected account for user:', {
+        userId: user.id,
+        email: user.email,
+        existingAccountId: user.stripeAccountId
+      });
+
       // Check if user already has a connected account
       if (user.stripeAccountId) {
-        return res.json({
-          accountId: user.stripeAccountId,
-          message: "Connected account already exists"
-        });
+        console.log('User already has connected account:', user.stripeAccountId);
+
+        // Verify account still exists in Stripe
+        try {
+          const existingAccount = await stripe.accounts.retrieve(user.stripeAccountId);
+          console.log('Existing account verified:', {
+            accountId: existingAccount.id,
+            charges_enabled: existingAccount.charges_enabled,
+            details_submitted: existingAccount.details_submitted
+          });
+
+          return res.json({
+            accountId: user.stripeAccountId,
+            message: "Connected account already exists",
+            account: {
+              id: existingAccount.id,
+              charges_enabled: existingAccount.charges_enabled,
+              details_submitted: existingAccount.details_submitted
+            }
+          });
+        } catch (stripeError: any) {
+          console.warn('Existing account not found in Stripe, will create new one:', {
+            accountId: user.stripeAccountId,
+            error: stripeError.message,
+            code: stripeError.code
+          });
+          // Account doesn't exist in Stripe (maybe deleted or mode mismatch)
+          // Continue to create new account
+        }
       }
+
+      console.log('Creating new Stripe Express account...');
 
       // Create Stripe Connected Account (Express account type for simplest onboarding)
       const account = await stripe.accounts.create({
@@ -1093,7 +1127,8 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
         country: 'US',
         email: user.email,
         capabilities: {
-          transfers: { requested: true },
+          card_payments: { requested: true },  // Required for destination charges
+          transfers: { requested: true },       // Required to receive transfers
         },
         business_type: 'individual',
         metadata: {
@@ -1102,7 +1137,12 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
         },
       });
 
-      console.log('Created Stripe Connected Account:', account.id);
+      console.log('✅ Created Stripe Connected Account successfully:', {
+        accountId: account.id,
+        email: account.email,
+        type: account.type,
+        country: account.country
+      });
 
       // Save account ID to user
       await storage.upsertUser({
@@ -1110,13 +1150,38 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
         stripeAccountId: account.id,
       });
 
+      console.log('✅ Saved account ID to user database');
+
       res.json({
         accountId: account.id,
         message: "Connected account created successfully"
       });
     } catch (error: any) {
-      console.error('Create connected account error:', error);
-      res.status(500).json({ message: error.message || 'Failed to create connected account' });
+      console.error('❌ Create connected account error:', {
+        message: error.message,
+        type: error.type,
+        code: error.code,
+        statusCode: error.statusCode,
+        raw: error.raw,
+        requestId: error.requestId,
+        stack: error.stack
+      });
+
+      // Provide more helpful error messages
+      let userMessage = error.message || 'Failed to create connected account';
+
+      if (error.code === 'account_invalid') {
+        userMessage = 'Stripe account configuration is invalid. This may be a test/live mode mismatch.';
+      } else if (error.type === 'StripeInvalidRequestError') {
+        userMessage = `Stripe API error: ${error.message}. Please check your Stripe keys are correctly configured.`;
+      }
+
+      res.status(500).json({
+        message: userMessage,
+        code: error.code,
+        type: error.type,
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
   });
 
