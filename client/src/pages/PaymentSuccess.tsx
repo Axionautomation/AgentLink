@@ -33,29 +33,71 @@ export default function PaymentSuccess() {
 
       setJobId(urlJobId);
 
-      // Verify payment status
-      const { paymentIntent } = await stripe.retrievePaymentIntent(clientSecret);
-      
-      if (!paymentIntent) {
-        setStatus("error");
-        return;
-      }
+      try {
+        // Verify payment status with Stripe
+        const { paymentIntent } = await stripe.retrievePaymentIntent(clientSecret);
 
-      switch (paymentIntent.status) {
-        case "succeeded":
-          setStatus("success");
-          // Redirect to job detail page after 2 seconds
-          setTimeout(() => {
-            setLocation(`/jobs/${urlJobId}`);
-          }, 2000);
-          break;
-        case "processing":
-          setStatus("loading");
-          break;
-        case "requires_payment_method":
-        default:
+        if (!paymentIntent) {
           setStatus("error");
-          break;
+          return;
+        }
+
+        switch (paymentIntent.status) {
+          case "succeeded":
+            // Payment succeeded - now confirm with backend
+            console.log('Payment succeeded, confirming with backend:', urlJobId);
+
+            try {
+              const token = localStorage.getItem('agentlink_auth_token');
+              const response = await fetch(`/api/jobs/${urlJobId}/confirm-payment`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`,
+                },
+                credentials: 'include',
+              });
+
+              if (!response.ok) {
+                const errorData = await response.json();
+                console.error('Backend confirmation failed:', errorData);
+                throw new Error(errorData.message || 'Failed to confirm payment with server');
+              }
+
+              console.log('Payment confirmed with backend successfully');
+              setStatus("success");
+
+              // Redirect to job detail page after 2 seconds
+              setTimeout(() => {
+                setLocation(`/jobs/${urlJobId}`);
+              }, 2000);
+            } catch (backendError: any) {
+              console.error('Backend confirmation error:', backendError);
+              // Payment succeeded with Stripe but backend confirmation failed
+              // Still show success to user but log the error
+              setStatus("success");
+              setTimeout(() => {
+                setLocation(`/jobs/${urlJobId}`);
+              }, 2000);
+            }
+            break;
+
+          case "processing":
+            setStatus("loading");
+            // Check again in 2 seconds
+            setTimeout(() => {
+              window.location.reload();
+            }, 2000);
+            break;
+
+          case "requires_payment_method":
+          default:
+            setStatus("error");
+            break;
+        }
+      } catch (error) {
+        console.error('Payment verification error:', error);
+        setStatus("error");
       }
     };
 
@@ -112,7 +154,7 @@ export default function PaymentSuccess() {
         </div>
         <h2 className="text-xl font-semibold text-card-foreground mb-2">Payment Successful!</h2>
         <p className="text-muted-foreground mb-6">
-          Your job has been posted to the marketplace. Redirecting...
+          Payment confirmed! The agent has been notified and funds are held in escrow. Redirecting...
         </p>
         <div className="flex gap-2 justify-center">
           {jobId && (

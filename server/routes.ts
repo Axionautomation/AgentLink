@@ -1234,8 +1234,44 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
           });
         }
 
-        // Create new checkout session
+        // Verify job is claimed and has claimer
+        if (!job.claimerId) {
+          return res.status(400).json({ message: "Job must be claimed before payment can be processed" });
+        }
+
+        // Get claimer info for Stripe Connect destination charge
+        const claimer = await storage.getUser(job.claimerId);
+        if (!claimer) {
+          return res.status(404).json({ message: "Claimer not found" });
+        }
+
+        // Verify claimer has Stripe account
+        if (!claimer.stripeAccountId) {
+          return res.status(400).json({
+            message: "Agent must connect their Stripe account before payment can be processed"
+          });
+        }
+
+        // Verify Stripe account is fully onboarded
+        const claimerAccount = await stripe.accounts.retrieve(claimer.stripeAccountId);
+        if (!claimerAccount.charges_enabled || !claimerAccount.details_submitted) {
+          return res.status(400).json({
+            message: "Agent's Stripe account is not fully set up. Please contact support."
+          });
+        }
+
+        // Calculate platform fee (10%)
         const fee = parseFloat(job.fee);
+        const totalAmount = Math.round(fee * 100); // in cents
+        const platformFeeAmount = Math.round(fee * 0.10 * 100); // 10% platform fee in cents
+
+        console.log('Creating checkout session with destination charge:', {
+          totalAmount,
+          platformFeeAmount,
+          claimerAccountId: claimer.stripeAccountId
+        });
+
+        // Create new checkout session WITH destination charge
         const checkoutSession = await stripe.checkout.sessions.create({
           customer: customerId,
           mode: 'payment',
@@ -1244,7 +1280,7 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
             {
               price_data: {
                 currency: 'usd',
-                unit_amount: Math.round(fee * 100),
+                unit_amount: totalAmount,
                 product_data: {
                   name: `AgentLink Job - ${job.propertyType.replace('_', ' ')}`,
                   description: `${job.propertyAddress} - ${new Date(job.scheduledDate).toLocaleDateString()}`,
@@ -1254,11 +1290,15 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
             },
           ],
           payment_intent_data: {
-            capture_method: 'manual',
+            // Destination charge - automatically transfer to claimer's connected account
+            application_fee_amount: platformFeeAmount, // 10% platform fee
+            transfer_data: {
+              destination: claimer.stripeAccountId, // Claimer's connected account
+            },
             metadata: {
               jobId: job.id,
               posterId: job.posterId,
-              claimerId: job.claimerId || '',
+              claimerId: job.claimerId,
               platformFee: job.platformFee || '0',
               payoutAmount: job.payoutAmount || '0',
             },
@@ -1307,24 +1347,52 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
       const job = await storage.getJob(req.params.jobId);
 
       if (!job) {
+        console.error('Payment intent request: Job not found', req.params.jobId);
         return res.status(404).json({ message: "Job not found" });
       }
 
       // Only poster can access payment intent
       if (job.posterId !== userId) {
+        console.error('Payment intent request: Unauthorized', { userId, posterId: job.posterId });
         return res.status(403).json({ message: "Not authorized" });
       }
 
       if (!job.paymentIntentId) {
+        console.error('Payment intent request: No payment intent ID', { jobId: job.id });
         return res.status(400).json({ message: "No payment intent found for this job" });
       }
 
-      // Retrieve payment intent from Stripe
-      const paymentIntent = await stripe.paymentIntents.retrieve(job.paymentIntentId);
+      console.log('Retrieving payment info for job:', job.id, 'Payment ID:', job.paymentIntentId);
 
-      res.json({ clientSecret: paymentIntent.client_secret });
+      // Check if it's a Checkout Session ID (cs_) or PaymentIntent ID (pi_)
+      if (job.paymentIntentId.startsWith('cs_')) {
+        // Retrieve Checkout Session
+        console.log('Retrieving Checkout Session:', job.paymentIntentId);
+        const session = await stripe.checkout.sessions.retrieve(job.paymentIntentId);
+
+        if (!session.client_secret) {
+          console.error('No client_secret in checkout session', { sessionId: session.id });
+          return res.status(400).json({ message: "Payment session not ready. Please try again." });
+        }
+
+        console.log('Returning client_secret from Checkout Session');
+        return res.json({ clientSecret: session.client_secret });
+      } else {
+        // It's a PaymentIntent ID
+        console.log('Retrieving PaymentIntent:', job.paymentIntentId);
+        const paymentIntent = await stripe.paymentIntents.retrieve(job.paymentIntentId);
+
+        if (!paymentIntent.client_secret) {
+          console.error('No client_secret in payment intent', { paymentIntentId: paymentIntent.id });
+          return res.status(400).json({ message: "Payment not ready. Please try again." });
+        }
+
+        console.log('Returning client_secret from PaymentIntent');
+        return res.json({ clientSecret: paymentIntent.client_secret });
+      }
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      console.error('Payment intent retrieval error:', error.message, error);
+      res.status(500).json({ message: error.message || 'Failed to retrieve payment information' });
     }
   });
 
