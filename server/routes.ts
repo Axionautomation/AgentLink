@@ -1116,6 +1116,17 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
       });
     } catch (error: any) {
       console.error('Create connected account error:', error);
+
+      // Check if this is the "Connect not enabled" error
+      if (error.message && error.message.includes("signed up for Connect")) {
+        return res.status(400).json({
+          message: "Stripe Connect is not enabled for this account. Please enable Stripe Connect in your Stripe Dashboard.",
+          setupRequired: true,
+          setupInstructions: "Go to https://dashboard.stripe.com/settings/connect and enable Connect for your account.",
+          stripeError: error.message
+        });
+      }
+
       res.status(500).json({ message: error.message || 'Failed to create connected account' });
     }
   });

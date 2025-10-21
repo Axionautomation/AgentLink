@@ -147,11 +147,23 @@ export default function Profile() {
       // Redirect to Stripe onboarding
       window.location.href = url;
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to connect Stripe account",
-        variant: "destructive",
-      });
+      // Check if this is a Stripe Connect setup error
+      if (error.setupRequired && error.setupInstructions) {
+        toast({
+          title: "Stripe Connect Setup Required",
+          description: error.setupInstructions,
+          variant: "destructive",
+          duration: 10000, // Show for 10 seconds
+        });
+        console.error("Stripe Connect Error:", error.stripeError);
+        console.log("Setup URL:", error.setupInstructions);
+      } else {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to connect Stripe account",
+          variant: "destructive",
+        });
+      }
       setConnectingStripe(false);
     }
   };
