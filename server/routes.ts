@@ -1236,27 +1236,88 @@ export async function registerRoutesOnly(app: Express): Promise<void> {
 
         // Verify job is claimed and has claimer
         if (!job.claimerId) {
-          return res.status(400).json({ message: "Job must be claimed before payment can be processed" });
+          console.error('Checkout URL error: Job not claimed', {
+            jobId: job.id,
+            status: job.status,
+            claimerId: job.claimerId
+          });
+          return res.status(400).json({
+            message: "This job hasn't been claimed yet. Payment can only be made after an agent claims the job.",
+            code: 'JOB_NOT_CLAIMED'
+          });
         }
 
         // Get claimer info for Stripe Connect destination charge
         const claimer = await storage.getUser(job.claimerId);
         if (!claimer) {
-          return res.status(404).json({ message: "Claimer not found" });
+          console.error('Checkout URL error: Claimer not found', {
+            jobId: job.id,
+            claimerId: job.claimerId
+          });
+          return res.status(404).json({
+            message: "The agent who claimed this job could not be found. Please contact support.",
+            code: 'CLAIMER_NOT_FOUND'
+          });
         }
+
+        console.log('Checking claimer Stripe account:', {
+          claimerId: claimer.id,
+          email: claimer.email,
+          hasStripeAccount: !!claimer.stripeAccountId,
+          stripeAccountId: claimer.stripeAccountId
+        });
 
         // Verify claimer has Stripe account
         if (!claimer.stripeAccountId) {
+          console.error('Checkout URL error: Agent has no Stripe account', {
+            jobId: job.id,
+            claimerId: claimer.id,
+            claimerEmail: claimer.email
+          });
           return res.status(400).json({
-            message: "Agent must connect their Stripe account before payment can be processed"
+            message: `The agent (${claimer.firstName} ${claimer.lastName}) needs to connect their Stripe account before you can make payment. Please ask them to complete their profile setup.`,
+            code: 'AGENT_NO_STRIPE_ACCOUNT',
+            agentEmail: claimer.email,
+            agentName: `${claimer.firstName} ${claimer.lastName}`
           });
         }
 
         // Verify Stripe account is fully onboarded
-        const claimerAccount = await stripe.accounts.retrieve(claimer.stripeAccountId);
-        if (!claimerAccount.charges_enabled || !claimerAccount.details_submitted) {
+        console.log('Verifying Stripe account status:', claimer.stripeAccountId);
+        try {
+          const claimerAccount = await stripe.accounts.retrieve(claimer.stripeAccountId);
+          console.log('Stripe account status:', {
+            accountId: claimerAccount.id,
+            charges_enabled: claimerAccount.charges_enabled,
+            details_submitted: claimerAccount.details_submitted,
+            payouts_enabled: claimerAccount.payouts_enabled
+          });
+
+          if (!claimerAccount.charges_enabled || !claimerAccount.details_submitted) {
+            console.error('Checkout URL error: Stripe account not ready', {
+              accountId: claimerAccount.id,
+              charges_enabled: claimerAccount.charges_enabled,
+              details_submitted: claimerAccount.details_submitted,
+              requirements: claimerAccount.requirements
+            });
+            return res.status(400).json({
+              message: `The agent's Stripe account is not fully set up yet. They need to complete their Stripe onboarding. Current status: charges_enabled=${claimerAccount.charges_enabled}, details_submitted=${claimerAccount.details_submitted}`,
+              code: 'AGENT_STRIPE_NOT_READY',
+              agentName: `${claimer.firstName} ${claimer.lastName}`,
+              requirements: claimerAccount.requirements?.currently_due || []
+            });
+          }
+        } catch (stripeError: any) {
+          console.error('Checkout URL error: Failed to verify Stripe account', {
+            accountId: claimer.stripeAccountId,
+            error: stripeError.message,
+            type: stripeError.type,
+            code: stripeError.code
+          });
           return res.status(400).json({
-            message: "Agent's Stripe account is not fully set up. Please contact support."
+            message: `Unable to verify the agent's Stripe account. Error: ${stripeError.message}. This may be a test/live mode mismatch.`,
+            code: 'STRIPE_ACCOUNT_ERROR',
+            stripeError: stripeError.message
           });
         }
 
